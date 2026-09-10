@@ -1,4 +1,4 @@
-// artest-creator — storage layer (SQLite nativo node:sqlite, zero dipendenze)
+// noesis-roads-creator — storage layer (SQLite nativo node:sqlite, zero dipendenze)
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -10,11 +10,22 @@ export const UPLOAD_DIR = join(ROOT, 'uploads');
 mkdirSync(DATA_DIR, { recursive: true });
 mkdirSync(UPLOAD_DIR, { recursive: true });
 
-export const DB_PATH = process.env.ARTEST_CREATOR_DB || join(DATA_DIR, 'artest-creator.db');
+// Percorso DB: NOESIS_CREATOR_DB (nuovo) con fallback ARTEST_CREATOR_DB (legacy).
+// Default nuovo; se esiste solo il DB storico artest-creator.db lo si riusa
+// (migrazione trasparente al primo avvio dopo la rinomina).
+function resolveDbPath() {
+  if (process.env.NOESIS_CREATOR_DB) return process.env.NOESIS_CREATOR_DB;
+  if (process.env.ARTEST_CREATOR_DB) return process.env.ARTEST_CREATOR_DB;
+  const next = join(DATA_DIR, 'noesis-roads-creator.db');
+  const legacy = join(DATA_DIR, 'artest-creator.db');
+  if (!existsSync(next) && existsSync(legacy)) return legacy;
+  return next;
+}
+export const DB_PATH = resolveDbPath();
 
-// Connessione di SCRITTURA (artest-creator server): inizializzata in modo lazy da initSchema().
-// Quando il modulo è importato da artest (server di sola lettura), il DB non viene aperto in scrittura
-// e lo schema non viene toccato: artest usa le funzioni *RO qui sotto (connessione read-only per query).
+// Connessione di SCRITTURA (server noesis-roads-creator): inizializzata in modo lazy da initSchema().
+// Quando il modulo è importato dal viewer (server di sola lettura), il DB non viene aperto in scrittura
+// e lo schema non viene toccato: il viewer usa le funzioni *RO qui sotto (connessione read-only per query).
 let _db = null;
 export function getDb() {
   if (!_db) {
@@ -205,6 +216,56 @@ export function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_comparison_sides ON comparison_sides(comparison_id);
     CREATE INDEX IF NOT EXISTS idx_comparison_points ON comparison_points(comparison_id);
+
+    -- --- Nucleo generico Noesis Roads (Fase 2, additivo: tabelle legacy intatte) ---
+    -- cfr. docs/ARCHITECTURE.md: materie, modelli_scheda, schede_lezione, sezioni, immagini
+    CREATE TABLE IF NOT EXISTS materie (
+      id TEXT PRIMARY KEY,
+      nome TEXT NOT NULL DEFAULT '',
+      descrizione TEXT NOT NULL DEFAULT '',
+      stato TEXT NOT NULL DEFAULT 'attiva',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS modelli_scheda (
+      id TEXT PRIMARY KEY,               -- stabile "materia:chiave:vN"
+      materia_id TEXT NOT NULL REFERENCES materie(id) ON DELETE CASCADE,
+      chiave TEXT NOT NULL,
+      nome TEXT NOT NULL DEFAULT '',
+      versione INTEGER NOT NULL DEFAULT 1,
+      schema_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(materia_id, chiave, versione)
+    );
+    CREATE TABLE IF NOT EXISTS schede_lezione (
+      id TEXT PRIMARY KEY,
+      modello_id TEXT NOT NULL REFERENCES modelli_scheda(id) ON DELETE CASCADE,
+      titolo TEXT NOT NULL DEFAULT '',
+      stato TEXT NOT NULL DEFAULT 'draft' CHECK (stato IN ('draft','ready')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS sezioni (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scheda_id TEXT NOT NULL REFERENCES schede_lezione(id) ON DELETE CASCADE,
+      chiave TEXT NOT NULL,
+      titolo TEXT NOT NULL DEFAULT '',
+      corpo_json TEXT NOT NULL DEFAULT '{}',
+      ordine INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(scheda_id, chiave)
+    );
+    CREATE TABLE IF NOT EXISTS immagini (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scheda_id TEXT NOT NULL REFERENCES schede_lezione(id) ON DELETE CASCADE,
+      ruolo TEXT NOT NULL DEFAULT '',
+      dati BLOB,
+      mime TEXT NOT NULL DEFAULT 'image/jpeg',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_modelli_materia ON modelli_scheda(materia_id);
+    CREATE INDEX IF NOT EXISTS idx_schede_modello ON schede_lezione(modello_id);
+    CREATE INDEX IF NOT EXISTS idx_sezioni_scheda ON sezioni(scheda_id);
+    CREATE INDEX IF NOT EXISTS idx_immagini_scheda ON immagini(scheda_id);
   `);
 
   // migrazione: le immagini vivono nel DB come BLOB (binary, non base64: più compatto e veloce).
@@ -752,8 +813,199 @@ export function publishArtwork(id) {
 }
 
 // ---------------------------------------------------------------------------
-// Accesso di SOLA LETTURA per artest (viewer): apre una connessione read-only
-// al DB di artest-creator senza MAI scrivere o toccare lo schema. Ogni chiamata
+// Nucleo generico (Fase 2): CRUD materie / modelli / schede-lezione / sezioni / immagini.
+// Additivo: le funzioni legacy sopra restano intatte.
+// La validazione dei corpi-sezione riusa il registry dei tipi via import
+// dinamico evitato qui per non accoppiare lo storage: il chiamante (server)
+// valida con core/* prima di salvare; qui si applica il gate required.
+// ---------------------------------------------------------------------------
+function rowToMateria(row) {
+  if (!row) return null;
+  return { id: row.id, nome: row.nome, descrizione: row.descrizione, stato: row.stato, createdAt: row.created_at };
+}
+function rowToModello(row) {
+  if (!row) return null;
+  let schema = {};
+  try { schema = JSON.parse(row.schema_json || '{}'); } catch { schema = {}; }
+  return { id: row.id, materiaId: row.materia_id, chiave: row.chiave, nome: row.nome, versione: row.versione, schema, createdAt: row.created_at };
+}
+function rowToScheda(row) {
+  if (!row) return null;
+  return { id: row.id, modelloId: row.modello_id, titolo: row.titolo, stato: row.stato, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
+export function upsertMateria({ id, nome, descrizione = '', stato = 'attiva' }) {
+  if (!String(id || '').trim()) throw new Error('materia.id obbligatorio');
+  getDb().prepare(`INSERT INTO materie (id, nome, descrizione, stato) VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, descrizione=excluded.descrizione, stato=excluded.stato`)
+    .run(id, nome || '', descrizione || '', stato || 'attiva');
+  return getMateria(id);
+}
+export function getMateria(id, conn) {
+  const row = (conn || getDb()).prepare('SELECT * FROM materie WHERE id = ?').get(id);
+  return rowToMateria(row);
+}
+export function listMaterie(conn) {
+  return (conn || getDb()).prepare('SELECT * FROM materie ORDER BY id').all().map(rowToMateria);
+}
+
+export function modelloIdStabile(materiaId, chiave, versione) {
+  return `${materiaId}:${chiave}:v${versione}`;
+}
+export function upsertModello({ materiaId, chiave, nome, versione = 1, schema }) {
+  if (!String(materiaId || '').trim()) throw new Error('modello.materiaId obbligatorio');
+  if (!String(chiave || '').trim()) throw new Error('modello.chiave obbligatorio');
+  if (!getMateria(materiaId)) throw new Error(`materia sconosciuta: ${materiaId}`);
+  const id = modelloIdStabile(materiaId, chiave, versione);
+  getDb().prepare(`INSERT INTO modelli_scheda (id, materia_id, chiave, nome, versione, schema_json) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, schema_json=excluded.schema_json`)
+    .run(id, materiaId, chiave, nome || '', versione, JSON.stringify(schema || {}));
+  return getModello(id);
+}
+export function getModello(id, conn) {
+  const row = (conn || getDb()).prepare('SELECT * FROM modelli_scheda WHERE id = ?').get(id);
+  return rowToModello(row);
+}
+export function listModelli(materiaId, conn) {
+  if (materiaId) return (conn || getDb()).prepare('SELECT * FROM modelli_scheda WHERE materia_id = ? ORDER BY chiave, versione').all(materiaId).map(rowToModello);
+  return (conn || getDb()).prepare('SELECT * FROM modelli_scheda ORDER BY materia_id, chiave, versione').all().map(rowToModello);
+}
+
+// Popola il nucleo dal registry dichiarativo (core/models.mjs): idempotente.
+// Accetta { materie: [...], modelli: [...] } per restare iniettabile nei test.
+export function seedCore({ materie = [], modelli = [] } = {}) {
+  for (const m of materie) upsertMateria({ id: m.id, nome: m.nome, descrizione: m.descrizione || '', stato: m.stato || 'attiva' });
+  for (const mod of modelli) {
+    upsertModello({ materiaId: mod.subject, chiave: mod.key, nome: mod.name, versione: mod.version || 1, schema: mod });
+  }
+  return { materie: listMaterie().length, modelli: listModelli().length };
+}
+
+export function createScheda({ id = null, modelloId, titolo = '' }) {
+  const modello = getModello(modelloId);
+  if (!modello) throw new Error(`modello sconosciuto: ${modelloId}`);
+  const schedaId = id || ('scheda-' + Date.now().toString(36));
+  if (getScheda(schedaId)) throw new Error(`esiste già una scheda con id ${schedaId}`);
+  getDb().prepare(`INSERT INTO schede_lezione (id, modello_id, titolo, stato, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?)`)
+    .run(schedaId, modelloId, titolo || '', now(), now());
+  return getScheda(schedaId);
+}
+export function getScheda(id, conn) {
+  const row = (conn || getDb()).prepare('SELECT * FROM schede_lezione WHERE id = ?').get(id);
+  return rowToScheda(row);
+}
+export function listSchede({ modelloId = null, stato = null } = {}, conn) {
+  const db = conn || getDb();
+  if (modelloId && stato) return db.prepare('SELECT * FROM schede_lezione WHERE modello_id = ? AND stato = ? ORDER BY updated_at DESC').all(modelloId, stato).map(rowToScheda);
+  if (modelloId) return db.prepare('SELECT * FROM schede_lezione WHERE modello_id = ? ORDER BY updated_at DESC').all(modelloId).map(rowToScheda);
+  if (stato) return db.prepare('SELECT * FROM schede_lezione WHERE stato = ? ORDER BY updated_at DESC').all(stato).map(rowToScheda);
+  return db.prepare('SELECT * FROM schede_lezione ORDER BY updated_at DESC').all().map(rowToScheda);
+}
+export function updateScheda(id, patch = {}) {
+  const current = getScheda(id);
+  if (!current) return null;
+  const titolo = patch.titolo !== undefined ? String(patch.titolo) : current.titolo;
+  getDb().prepare('UPDATE schede_lezione SET titolo = ?, updated_at = ? WHERE id = ?').run(titolo, now(), id);
+  return getScheda(id);
+}
+export function deleteScheda(id) {
+  getDb().prepare('DELETE FROM schede_lezione WHERE id = ?').run(id);
+}
+
+function parseCorpo(text) {
+  try { return JSON.parse(text || '{}'); } catch { return {}; }
+}
+export function saveSezione(schedaId, chiave, corpo) {
+  const scheda = getScheda(schedaId);
+  if (!scheda) throw new Error(`scheda sconosciuta: ${schedaId}`);
+  const modello = getModello(scheda.modelloId);
+  const def = modello && Array.isArray(modello.schema.sections)
+    ? modello.schema.sections.find((s) => s.key === chiave)
+    : null;
+  if (!def) throw new Error(`sezione sconosciuta per questo modello: ${chiave}`);
+  const corpoObj = (corpo && typeof corpo === 'object') ? corpo : parseCorpo(corpo);
+  const ordine = Math.max(0, modello.schema.sections.findIndex((s) => s.key === chiave));
+  getDb().prepare(`INSERT INTO sezioni (scheda_id, chiave, titolo, corpo_json, ordine, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(scheda_id, chiave) DO UPDATE SET titolo=excluded.titolo, corpo_json=excluded.corpo_json, ordine=excluded.ordine, updated_at=excluded.updated_at`)
+    .run(schedaId, chiave, def.title || '', JSON.stringify(corpoObj), ordine, now());
+  return getSezione(schedaId, chiave);
+}
+export function getSezione(schedaId, chiave, conn) {
+  const row = (conn || getDb()).prepare('SELECT * FROM sezioni WHERE scheda_id = ? AND chiave = ?').get(schedaId, chiave);
+  if (!row) return null;
+  return { id: row.id, schedaId: row.scheda_id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine, updatedAt: row.updated_at };
+}
+export function listSezioni(schedaId, conn) {
+  return (conn || getDb()).prepare('SELECT * FROM sezioni WHERE scheda_id = ? ORDER BY ordine, chiave').all(schedaId)
+    .map((row) => ({ id: row.id, schedaId: row.scheda_id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine, updatedAt: row.updated_at }));
+}
+
+function corpoVuoto(tipo, corpo, haImmagini) {
+  if (tipo === 'image') return !haImmagini;
+  if (!corpo || typeof corpo !== 'object') return true;
+  if (tipo === 'text') return !String(corpo.text || '').trim();
+  if (tipo === 'epochs') return !Array.isArray(corpo.chapters) || corpo.chapters.length === 0;
+  if (tipo === 'works') return !Array.isArray(corpo.works) || corpo.works.length === 0;
+  if (tipo === 'points') return !Array.isArray(corpo.items) || corpo.items.length === 0;
+  if (tipo === 'kv') return !Array.isArray(corpo.entries) || corpo.entries.length === 0;
+  if (tipo === 'pair') {
+    const a = corpo.a || {}, b = corpo.b || {};
+    return (!String(a.title || '').trim() && !String(a.text || '').trim()) && (!String(b.title || '').trim() && !String(b.text || '').trim());
+  }
+  return false;
+}
+
+// Gate "Genera e salva prima i contenuti": ready solo a sezioni required piene.
+// Ritorna { ok, missing: [chiavi] }; se ok, passa la scheda a ready.
+export function approveScheda(id) {
+  const scheda = getScheda(id);
+  if (!scheda) return null;
+  const modello = getModello(scheda.modelloId);
+  const sections = (modello && Array.isArray(modello.schema.sections)) ? modello.schema.sections : [];
+  const salvate = new Map(listSezioni(id).map((s) => [s.chiave, s.corpo]));
+  const nImmagini = getDb().prepare('SELECT COUNT(*) AS c FROM immagini WHERE scheda_id = ?').get(id).c;
+  const missing = sections.filter((s) => s.required).filter((s) => corpoVuoto(s.type, salvate.get(s.key), nImmagini > 0)).map((s) => s.key);
+  if (missing.length) return { ok: false, missing };
+  getDb().prepare("UPDATE schede_lezione SET stato = 'ready', updated_at = ? WHERE id = ?").run(now(), id);
+  return { ok: true, missing: [], scheda: getScheda(id) };
+}
+
+export function addImmagine(schedaId, ruolo, dati, mime = 'image/jpeg') {
+  if (!getScheda(schedaId)) throw new Error(`scheda sconosciuta: ${schedaId}`);
+  if (!String(ruolo || '').trim()) throw new Error('immagini.ruolo obbligatorio');
+  const result = getDb().prepare('INSERT INTO immagini (scheda_id, ruolo, dati, mime) VALUES (?, ?, ?, ?)')
+    .run(schedaId, ruolo, dati, mime || 'image/jpeg');
+  return result.lastInsertRowid;
+}
+export function listImmagini(schedaId, conn, withData = false) {
+  const rows = (conn || getDb()).prepare('SELECT * FROM immagini WHERE scheda_id = ? ORDER BY id').all(schedaId);
+  return rows.map((row) => withData
+    ? { id: row.id, schedaId: row.scheda_id, ruolo: row.ruolo, data: row.dati, mime: row.mime }
+    : { id: row.id, schedaId: row.scheda_id, ruolo: row.ruolo, mime: row.mime, bytes: row.dati ? row.dati.length : 0 });
+}
+export function getImmagine(immagineId, conn) {
+  const row = (conn || getDb()).prepare('SELECT * FROM immagini WHERE id = ?').get(immagineId);
+  if (!row) return null;
+  return { id: row.id, schedaId: row.scheda_id, ruolo: row.ruolo, data: row.dati, mime: row.mime || 'image/jpeg' };
+}
+export function deleteImmagine(immagineId) {
+  getDb().prepare('DELETE FROM immagini WHERE id = ?').run(immagineId);
+}
+
+export function getSchedaFull(id, conn) {
+  const db = conn || getDb();
+  const scheda = rowToScheda(db.prepare('SELECT * FROM schede_lezione WHERE id = ?').get(id));
+  if (!scheda) return null;
+  const modello = rowToModello(db.prepare('SELECT * FROM modelli_scheda WHERE id = ?').get(scheda.modelloId));
+  const sezioni = db.prepare('SELECT * FROM sezioni WHERE scheda_id = ? ORDER BY ordine, chiave').all(id)
+    .map((row) => ({ id: row.id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine }));
+  const immaginiMeta = db.prepare('SELECT id, ruolo, mime, length(dati) AS bytes FROM immagini WHERE scheda_id = ? ORDER BY id').all(id);
+  return { ...scheda, modello, sezioni, immagini: immaginiMeta };
+}
+
+// ---------------------------------------------------------------------------
+// Accesso di SOLA LETTURA per il viewer (noesis-roads): apre una connessione read-only
+// al DB di noesis-roads-creator senza MAI scrivere o toccare lo schema. Ogni chiamata
 // apre/chiude la connessione: nessun lock persistente verso il server autore.
 // ---------------------------------------------------------------------------
 function openReadonly() {
@@ -804,7 +1056,7 @@ export function getSimilarImageRO(artworkId, similarId) {
   try { return getSimilarImage(artworkId, similarId); } finally { conn.close(); }
 }
 
-// --- Schede Soggetto (RO per artest) ---
+// --- Schede Soggetto (RO per il viewer) ---
 export function listReadySubjectsRO() {
   const conn = openReadonly();
   try { return conn.prepare("SELECT * FROM subjects WHERE status = 'ready' ORDER BY updated_at DESC").all().map(rowToSubject); } finally { conn.close(); }
@@ -818,7 +1070,7 @@ export function getSubjectWorkImageRO(subjectId, workId) {
   try { return getSubjectWorkImage(subjectId, workId, conn); } finally { conn.close(); }
 }
 
-// --- Schede Faccia a faccia (RO per artest) ---
+// --- Schede Faccia a faccia (RO per il viewer) ---
 export function listReadyComparisonsRO() {
   const conn = openReadonly();
   try { return conn.prepare("SELECT * FROM comparisons WHERE status = 'ready' ORDER BY updated_at DESC").all().map(rowToComparison); } finally { conn.close(); }
@@ -837,4 +1089,29 @@ export function getComparisonThumbRO(comparisonId) {
     const row = conn.prepare('SELECT thumb_data, thumb_mime FROM comparisons WHERE id = ?').get(comparisonId);
     return (row && row.thumb_data) ? { data: row.thumb_data, mime: row.thumb_mime || 'image/jpeg' } : null;
   } finally { conn.close(); }
+}
+
+// --- Nucleo generico (RO per il viewer generico) ---
+export function listMaterieRO() {
+  const conn = openReadonly();
+  try { return listMaterie(conn); } finally { conn.close(); }
+}
+export function listModelliRO(materiaId) {
+  const conn = openReadonly();
+  try { return listModelli(materiaId, conn); } finally { conn.close(); }
+}
+export function listReadySchedeRO(modelloId = null) {
+  const conn = openReadonly();
+  try {
+    if (modelloId) return conn.prepare("SELECT * FROM schede_lezione WHERE stato = 'ready' AND modello_id = ? ORDER BY updated_at DESC").all(modelloId).map(rowToScheda);
+    return conn.prepare("SELECT * FROM schede_lezione WHERE stato = 'ready' ORDER BY updated_at DESC").all().map(rowToScheda);
+  } finally { conn.close(); }
+}
+export function getSchedaFullRO(id) {
+  const conn = openReadonly();
+  try { return getSchedaFull(id, conn); } finally { conn.close(); }
+}
+export function getImmagineRO(immagineId) {
+  const conn = openReadonly();
+  try { return getImmagine(immagineId, conn); } finally { conn.close(); }
 }

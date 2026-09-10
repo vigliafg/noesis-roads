@@ -1,5 +1,5 @@
 // Presentazione storico-artistica sopra il viewer.
-// Quando l'opera arriva dal DB di artest-creator porta già overview e opere simili
+// Quando l'opera arriva dal DB di noesis-roads-creator porta già overview e opere simili
 // (array simile al risultato del servizio AI): li mostriamo senza chiamate live.
 
 function countWords(text) { return String(text || '').split(/\s+/).filter(Boolean).length; }
@@ -17,7 +17,7 @@ function ArtworkOverview({ artwork }) {
   const [collapsed, setCollapsed] = React.useState(false);
   const trackRef = React.useRef(null);
 
-  // Dati già pronti nell'oggetto opera (schema del DB di artest-creator)…
+  // Dati già pronti nell'oggetto opera (schema del DB di noesis-roads-creator)…
   const hasStoredOverview = Boolean(artwork.overview && artwork.overview.painting);
   const overview = hasStoredOverview ? artwork.overview : null;
   // …oppure, per retro-compatibilità, i campi del servizio AI in linea.
@@ -26,7 +26,7 @@ function ArtworkOverview({ artwork }) {
   const similarWorks = Array.isArray(artwork.similarWorks) ? artwork.similarWorks : [];
   const sources = (artwork.sources || []).filter(s => s && s.url);
   const disclaimer = hasStoredOverview
-    ? 'Presentazione redatta nella scheda didattica di artest-creator (conoscenza del modello verificata in fase di pubblicazione).'
+    ? 'Presentazione redatta nella scheda didattica di noesis-roads-creator (conoscenza del modello verificata in fase di pubblicazione).'
     : (fallbackOverview && fallbackOverview.disclaimer) || '';
 
   function scrollSim(dx) {
@@ -72,7 +72,7 @@ function ArtworkOverview({ artwork }) {
         <div className="overview-card overview-error" aria-live="polite">
           <Icon name="info" size={22} />
           <h3>Presentazione non disponibile</h3>
-          <p>Questa scheda non ha ancora un testo introduttivo. Pubblica l’opera da artest-creator per vederlo qui.</p>
+          <p>Questa scheda non ha ancora un testo introduttivo. Pubblica l’opera da noesis-roads-creator per vederlo qui.</p>
         </div>
       )}
 

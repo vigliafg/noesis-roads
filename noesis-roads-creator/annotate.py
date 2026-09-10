@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# artest-creator — annotate.py
+# noesis-roads-creator — annotate.py
 # Disegna sopra l'immagine pulita i riquadri e le didascalie dei dettagli notevoli.
 # Uso: python3 annotate.py <immagine> <dettagli.json> <output.jpg>
 #   dettagli.json: [{ "title": "...", "category": "...", "region": {"x","y","width","height"} }]  (coordinate 0..1)
 # Stampa sempre RIQUADRI_DISEGNATI n / DIDASCALIE_DISEGNATE n (deve essere n == numero dettagli).
 import json, os, sys
 
-GOLD = (222, 166, 60)          # riquadro (stile artest)
+GOLD = (222, 166, 60)          # riquadro (stile viewer)
 DARK = (22, 26, 33)            # sfondo chip didascalia
 FONT_CANDIDATES = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',

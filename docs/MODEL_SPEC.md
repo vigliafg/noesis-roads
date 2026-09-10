@@ -41,7 +41,7 @@ fissi iniziali e (in futuro) per quelli creati dall'utente.
   intestazione materia/modello + frammento + vincoli (lingua, lunghezza,
   "solo fatti ragionevolmente certi", niente invenzioni).
 - `required: true` blocca l'approvazione se la sezione è vuota (stesso gate
-  "Genera e salva prima i contenuti" di artest).
+  "Genera e salva prima i contenuti" del creator).
 - Validazione: tipi noti, chiavi uniche, almeno una sezione, cover con ruoli
   immagine esistenti.
 

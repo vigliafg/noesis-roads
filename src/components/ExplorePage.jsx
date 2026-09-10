@@ -1,4 +1,4 @@
-// Presenta la scheda didattica salvata nel database (artest-creator): le sezioni
+// Presenta la scheda didattica salvata nel database (noesis-roads-creator): le sezioni
 // vengono lette dal contenuto pubblicato, senza chiamate live al modello.
 // I due livelli (Scuola secondaria / Approfondimento) mostrano solo le proprie sezioni.
 
@@ -54,8 +54,8 @@ function ExplorePage({ artwork, onBack }) {
         content: content,
         sources: (artwork.sources || []).filter(function (s) { return s && s.url; }),
         disclaimer: level === 'Approfondimento'
-          ? 'Testi della scheda didattica (artest-creator): confronti, questioni aperte e tecnica pittorica specifici di questo dettaglio, verificati in fase di pubblicazione.'
-          : 'Testi della scheda didattica (artest-creator): cosa vedi, cosa significa e il legame con gli altri dettagli dell’opera, verificati in fase di pubblicazione.'
+          ? 'Testi della scheda didattica (noesis-roads-creator): confronti, questioni aperte e tecnica pittorica specifici di questo dettaglio, verificati in fase di pubblicazione.'
+          : 'Testi della scheda didattica (noesis-roads-creator): cosa vedi, cosa significa e il legame con gli altri dettagli dell’opera, verificati in fase di pubblicazione.'
       };
     });
     return levels;
@@ -75,7 +75,7 @@ function ExplorePage({ artwork, onBack }) {
     }
   }
 
-  // La didascalia attiva funziona come toggle (come in artest-creator): ripremendola
+  // La didascalia attiva funziona come toggle (come nel creator): ripremendola
   // si torna all'immagine completa a colori, senza box e senza selezione.
   function chooseHotspot(hotspot) {
     if (selected && String(selected.id) === String(hotspot.id)) {
@@ -94,10 +94,15 @@ function ExplorePage({ artwork, onBack }) {
       <header className="explore-header">
         <div className="explore-header-left">
           <a href="#" className="brand" onClick={(event) => { event.preventDefault(); onBack(); }} aria-label="Torna alla collezione"><span className="brand-mark"><i></i><i></i><i></i></span><span>leggi l’<strong>opera</strong></span></a>
-          <button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all’hub di Artest"><span>←</span> Hub</button>
+          <button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all’hub di Noesis Roads"><span>←</span> Hub</button>
         </div>
         <div className="explore-progress"><span>01</span><i></i><span>Esplorazione guidata</span></div>
-        <button className="back-button" onClick={onBack}><span className="back-icon">←</span> Torna alla collezione</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {String(artwork.image || '').indexOf('/api/') === 0 && (
+            <a className="back-button" href={'/api/artworks/' + encodeURIComponent(artwork.id) + '/pdf'} title="Scarica il PDF libro d'arte">⬇ PDF</a>
+          )}
+          <button className="back-button" onClick={onBack}><span className="back-icon">←</span> Torna alla collezione</button>
+        </div>
       </header>
       <section className="explore-intro">
         <div>

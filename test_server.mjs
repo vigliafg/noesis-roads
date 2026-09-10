@@ -6,12 +6,12 @@ import { readFile, writeFile, copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildOverviewPrompt, buildSimilarPrompt, buildTextPrompt, callModel, callOpenRouter, callOpenRouterOverview, cleanModelJson, createAppServer, getOpenRouterApiKey, normalizeAnalysis, normalizeOverview, normalizeSimilar, resolveSimilarImage, VISION_MODEL, TEXT_MODEL } from './server.mjs';
-import { buildArtworkPdfPayload, buildSubjectPdfPayload, buildComparisonPdfPayload, createCreatorServer } from './artest-creator/server.mjs';
+import { buildArtworkPdfPayload, buildSubjectPdfPayload, buildComparisonPdfPayload, createCreatorServer } from './noesis-roads-creator/server.mjs';
 
 const execFileAsync = promisify(execFile);
 
-// Libreria pubblicata: accesso in sola lettura alle schede "ready" di artest-creator.
-import { DB_PATH, listReadyArtworksRO, getArtworkImageDataRO, getOverviewRO, listDetailsRO, getDetailContentRO, listSourcesRO, listSimilarWorksRO, getSimilarImageRO } from './artest-creator/db.mjs';
+// Libreria pubblicata: accesso in sola lettura alle schede "ready" di noesis-roads-creator.
+import { DB_PATH, listReadyArtworksRO, getArtworkImageDataRO, getOverviewRO, listDetailsRO, getDetailContentRO, listSourcesRO, listSimilarWorksRO, getSimilarImageRO } from './noesis-roads-creator/db.mjs';
 
 const input = {
   artwork: { title: 'Annunciazione', artist: 'Beato Angelico', period: 'Rinascimento fiorentino' },
@@ -262,12 +262,12 @@ test('web grounding is disabled by default', async () => {
 
 test('read-only DB accessors read a published artwork without writing', async () => {
   // Copia di prova su DB temporaneo: le funzioni RO aprono la connessione in readOnly.
-  const dir = await mkdtemp(join(tmpdir(), 'artest-ro-'));
+  const dir = await mkdtemp(join(tmpdir(), 'noesis-ro-'));
   const copy = join(dir, 'copy.db');
   try {
     await copyFile(DB_PATH, copy);
-    const previous = process.env.ARTEST_CREATOR_DB;
-    process.env.ARTEST_CREATOR_DB = copy;
+    const previous = process.env.NOESIS_CREATOR_DB;
+    process.env.NOESIS_CREATOR_DB = copy;
     // NB: DB_PATH è già stato risolto all'import; per isolare davvero il test
     // apriamo la copia riusando le stesse funzioni (connessione read-only sul file).
     const works = listReadyArtworksRO();
@@ -287,7 +287,7 @@ test('read-only DB accessors read a published artwork without writing', async ()
       assert.equal(listSourcesRO(id).length >= 0, true);
       assert.equal(listSimilarWorksRO(id).length >= 0, true);
     }
-    if (previous === undefined) delete process.env.ARTEST_CREATOR_DB; else process.env.ARTEST_CREATOR_DB = previous;
+    if (previous === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previous;
   } finally {
     await import('node:fs/promises').then(fs => fs.rm(dir, { recursive: true, force: true }));
   }
@@ -326,15 +326,15 @@ test('normalizeAnalysis surfaces web citations as sources', () => {
   assert.equal(result.sources.length, 2);
 });
 
-import { buildSubjectIntroPrompt, normalizeSubjectOutline, normalizeSubjectChapters, normalizeSubjectClosing, buildSubjectWorksPrompt, buildSubjectChaptersPrompt, buildComparisonIntroPrompt, buildComparisonPointsPrompt, buildComparisonAnalysisPrompt, normalizeComparisonIntro, normalizeComparisonPoints, normalizeComparisonAnalysis } from './artest-creator/server.mjs';
+import { buildSubjectIntroPrompt, normalizeSubjectOutline, normalizeSubjectChapters, normalizeSubjectClosing, buildSubjectWorksPrompt, buildSubjectChaptersPrompt, buildComparisonIntroPrompt, buildComparisonPointsPrompt, buildComparisonAnalysisPrompt, normalizeComparisonIntro, normalizeComparisonPoints, normalizeComparisonAnalysis } from './noesis-roads-creator/server.mjs';
 
 test('new schemas (subjects + comparisons) CRUD and RO roundtrip', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'artest-schemas-'));
+  const dir = await mkdtemp(join(tmpdir(), 'noesis-schemas-'));
   const dbPath = join(dir, 'test.db');
-  const previous = process.env.ARTEST_CREATOR_DB;
-  process.env.ARTEST_CREATOR_DB = dbPath;
+  const previous = process.env.NOESIS_CREATOR_DB;
+  process.env.NOESIS_CREATOR_DB = dbPath;
   try {
-    const mod = await import('./artest-creator/db.mjs?t=' + Date.now());
+    const mod = await import('./noesis-roads-creator/db.mjs?t=' + Date.now());
     mod.initSchema();
     const s = mod.createSubject({ id: 'nativita', name: 'Natività' });
     assert.equal(s.status, 'draft');
@@ -372,7 +372,7 @@ test('new schemas (subjects + comparisons) CRUD and RO roundtrip', async () => {
     mod.deleteSubject('nativita');
     assert.equal(mod.getSubjectRO('nativita'), null);
   } finally {
-    if (previous === undefined) delete process.env.ARTEST_CREATOR_DB; else process.env.ARTEST_CREATOR_DB = previous;
+    if (previous === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previous;
     await import('node:fs/promises').then(fs => fs.rm(dir, { recursive: true, force: true }));
   }
 });
@@ -429,12 +429,12 @@ test('callModel extracts url_citation annotations from the message', async () =>
 const PDF_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='; // 1x1 px PNG
 
 function runMakePdf(payload) {
-  return mkdtemp(join(tmpdir(), 'artest-pdf-')).then(async dir => {
+  return mkdtemp(join(tmpdir(), 'noesis-pdf-')).then(async dir => {
     const inPath = join(dir, 'in.json');
     const outPath = join(dir, 'out.pdf');
     await writeFile(inPath, JSON.stringify(payload));
     try {
-      await execFileAsync('python3', ['make_pdf.py', inPath, outPath], { cwd: 'artest-creator', timeout: 120000 });
+      await execFileAsync('python3', ['make_pdf.py', inPath, outPath], { cwd: 'noesis-roads-creator', timeout: 120000 });
       const buf = await readFile(outPath);
       return buf;
     } finally {
@@ -544,17 +544,17 @@ test('make_pdf renders the comparison payload as a valid art-book PDF', async ()
 });
 
 test('creator PDF endpoints return application/pdf for the three card types', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'artest-pdf-api-'));
+  const dir = await mkdtemp(join(tmpdir(), 'noesis-pdf-api-'));
   const dbPath = join(dir, 'test.db');
   const tmpScript = join(dir, 'spawn_server.mjs');
-  const previous = process.env.ARTEST_CREATOR_DB;
-  process.env.ARTEST_CREATOR_DB = dbPath;
+  const previous = process.env.NOESIS_CREATOR_DB;
+  process.env.NOESIS_CREATOR_DB = dbPath;
   let child;
   try {
     // DB popolato via write-connection dirette (niente LLM); l'immagine è il
     // PNG 1x1 valido: esercita il crop su BLOB non-JPEG in make_pdf.py.
     const png = Buffer.from(PDF_PIXEL, 'base64');
-    const db = await import('./artest-creator/db.mjs?t=' + Date.now());
+    const db = await import('./noesis-roads-creator/db.mjs?t=' + Date.now());
     db.initSchema();
     db.createArtwork({ id: 'w1', title: 'Annunciazione', artist: 'Beato Angelico', date: 'c. 1440', imagePath: 'uploads/x.jpg', imageData: png, imageMime: 'image/png', imageWidth: 1, imageHeight: 1 });
     db.saveOverview('w1', { painting: 'Il dipinto…', artist: 'L’artista…' }, { status: 'approved' });
@@ -575,7 +575,7 @@ test('creator PDF endpoints return application/pdf for the three card types', as
     // Server subprocess sul DB temporaneo (la cache _db del modulo viene
     // inizializzata al primo uso dentro il subprocess, isolata dal runner).
     // Lo script vive in dir ma importa server.mjs con path assoluto file://.
-    const serverAbs = join(process.cwd(), 'artest-creator', 'server.mjs').replace(/\\/g, '/');
+    const serverAbs = join(process.cwd(), 'noesis-roads-creator', 'server.mjs').replace(/\\/g, '/');
     await writeFile(tmpScript, [
       `import { createCreatorServer } from 'file://${serverAbs}';`,
       'const s = createCreatorServer();',
@@ -583,7 +583,7 @@ test('creator PDF endpoints return application/pdf for the three card types', as
       '  process.stdout.write(String(s.address().port) + "\\n");',
       '});'
     ].join('\n'));
-    child = fork(tmpScript, [], { env: { ...process.env, ARTEST_CREATOR_DB: dbPath }, silent: true });
+    child = fork(tmpScript, [], { env: { ...process.env, NOESIS_CREATOR_DB: dbPath }, silent: true });
     const port = await new Promise((resolve, reject) => {
       let out = '';
       const timer = setTimeout(() => reject(new Error('timeout in attesa del subserver')), 15000);
@@ -625,7 +625,7 @@ test('creator PDF endpoints return application/pdf for the three card types', as
       try { await new Promise(r => setTimeout(r, 50)); } catch {}
       try { child.kill('SIGKILL'); } catch {}
     }
-    if (previous === undefined) delete process.env.ARTEST_CREATOR_DB; else process.env.ARTEST_CREATOR_DB = previous;
+    if (previous === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previous;
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -647,11 +647,13 @@ test('launcher hub serves the two big buttons with configured ports', async () =
     const res = await fetch(`http://127.0.0.1:${port}/`);
     assert.equal(res.status, 200);
     const html = await res.text();
-    assert.ok(html.includes('Vedi le schede di Artest'));
-    assert.ok(html.includes('Crea le schede di Artest'));
+    assert.ok(html.includes('Vedi le schede'));
+    assert.ok(html.includes('Crea le schede'));
     assert.ok(html.includes('18000'));
     assert.ok(html.includes('18100'));
     assert.ok(html.includes('Opzioni'));
+    assert.ok(html.includes('materieLinks'));
+    assert.ok(html.includes('?materia='));
     const health = await (await fetch(`http://127.0.0.1:${port}/api/health`)).json();
     assert.equal(health.viewer.port, 18000);
     assert.equal(health.creator.port, 18100);
@@ -667,7 +669,7 @@ test('launcher planned restart does not spawn duplicate children', async () => {
   // il timer di respawn dell'exit handler ne rilanciava copie spurie in loop
   // (EADDRINUSE). Con figli dummy: dopo restart, i pid cambiano una volta sola
   // e restano stabili.
-  const dir = await mkdtemp(join(tmpdir(), 'artest-hub-kids-'));
+  const dir = await mkdtemp(join(tmpdir(), 'noesis-hub-kids-'));
   try {
     const dummy = join(dir, 'dummy.mjs');
     await writeFile(dummy, 'setInterval(() => {}, 1000);\n');
@@ -698,9 +700,9 @@ test('launcher planned restart does not spawn duplicate children', async () => {
 });
 
 test('launcher config roundtrips on an isolated env file without leaking the key', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'artest-hub-'));
+  const dir = await mkdtemp(join(tmpdir(), 'noesis-hub-'));
   const envFile = join(dir, '.env.local');
-  const previous = process.env.ARTEST_HUB_ENV_FILE;
+  const previous = process.env.NOESIS_HUB_ENV_FILE;
   try {
     await writeFile(envFile, 'UNRELATED_KEEPME=1\nOPENROUTER_API_KEY=old\n');
     const hub = createHubServer({ hubPort: 0, spawn: false, env: { ...process.env }, envFile });
@@ -731,7 +733,7 @@ test('launcher config roundtrips on an isolated env file without leaking the key
       await hub.stop();
     }
   } finally {
-    if (previous === undefined) delete process.env.ARTEST_HUB_ENV_FILE; else process.env.ARTEST_HUB_ENV_FILE = previous;
+    if (previous === undefined) delete process.env.NOESIS_HUB_ENV_FILE; else process.env.NOESIS_HUB_ENV_FILE = previous;
     await rm(dir, { recursive: true, force: true });
   }
 });

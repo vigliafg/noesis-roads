@@ -1,4 +1,4 @@
-// Scheda "Soggetto nella storia dell'arte" letta dal DB (artest-creator).
+// Scheda "Soggetto nella storia dell'arte" letta dal DB (noesis-roads-creator).
 // Sezioni: introduzione/origini, timeline dei capitoli, galleria opere, simboli,
 // interpretazioni, curiosità — con comandi A+/A− come nel resto dell'app.
 
@@ -41,10 +41,13 @@ function SubjectView({ subject, onBack }) {
       <header className="explore-header">
         <div className="explore-header-left">
           <a href="#" className="brand" onClick={(event) => { event.preventDefault(); onBack(); }} aria-label="Torna alla collezione"><span className="brand-mark"><i></i><i></i><i></i></span><span>leggi l’<strong>opera</strong></span></a>
-          <button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all’hub di Artest"><span>←</span> Hub</button>
+          <button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all’hub di Noesis Roads"><span>←</span> Hub</button>
         </div>
         <div className="explore-progress"><span>02</span><i></i><span>Il soggetto nella storia dell’arte</span></div>
-        <button className="back-button" onClick={onBack}><span className="back-icon">←</span> Torna alla collezione</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <a className="back-button" href={'/api/subjects/' + encodeURIComponent(subject.id) + '/pdf'} title="Scarica il PDF libro d'arte">⬇ PDF</a>
+          <button className="back-button" onClick={onBack}><span className="back-icon">←</span> Torna alla collezione</button>
+        </div>
       </header>
       <section className="explore-intro">
         <div>
@@ -74,10 +77,10 @@ function SubjectView({ subject, onBack }) {
               ) : null}
             </div>
             <div className="overview-foot"><span className="overview-count">{countWords(subject.intro) + countWords(subject.origins)} parole</span></div>
-            <p className="overview-disclaimer">Scheda didattica generata con intelligenza artificiale (artest-creator) e verificata in fase di pubblicazione.</p>
+            <p className="overview-disclaimer">Scheda didattica generata con intelligenza artificiale (noesis-roads-creator) e verificata in fase di pubblicazione.</p>
           </div>
         ) : (
-          <div className="overview-card overview-error"><Icon name="info" size={22} /><h3>Contenuti non ancora generati</h3><p>Pubblica la scheda del soggetto da artest-creator per vedere qui l’evoluzione del soggetto.</p></div>
+          <div className="overview-card overview-error"><Icon name="info" size={22} /><h3>Contenuti non ancora generati</h3><p>Pubblica la scheda del soggetto da noesis-roads-creator per vedere qui l’evoluzione del soggetto.</p></div>
         )}
       </section>
 

@@ -1,15 +1,15 @@
-# artest-creator · app sorella di artest
+# noesis-roads-creator · app sorella di noesis-roads
 
 Applicazione di **authoring dei contenuti didattici**: carichi l'immagine di un
 dipinto e l'LLM propone l'intera scheda (opera, artista, dettagli notevoli e
 tutte le sezioni didattiche). Tu rivedi, correggi e **salvi nel database** con
-un clic. La sorella **artest** resta l'app di lettura/esplorazione.
+un clic. La sorella **noesis-roads** resta l'app di lettura/esplorazione.
 
 ## Stack
 
 - **Zero dipendenze**: Node ≥ 22.5, solo moduli nativi (`node:http`,
   `node:sqlite`). Nessun `npm install`.
-- **Database**: SQLite singolo file (`data/artest-creator.db`, modalità WAL),
+- **Database**: SQLite singolo file (`data/noesis-roads-creator.db`, modalità WAL),
   schema normalizzato: `artworks` → `details` (hotspot con regioni 0–1) →
   `detail_content` (7 campi per dettaglio × tab `studio`/`approfondimento`),
   più `overview` (testo opera + artista), `sources` e `similar_works` (10
@@ -20,9 +20,9 @@ un clic. La sorella **artest** resta l'app di lettura/esplorazione.
   `annotate.py` via PIL). Servite come binario da
   `/api/artworks/:id/image` e `/api/artworks/:id/image-annotated`; il file in
   `uploads/` resta solo scratch per PIL. Le due immagini vengono esportate nel
-  publish JSON (campi `imageUrl` / `annotatedImageUrl`) per artest. La BLOB
+  publish JSON (campi `imageUrl` / `annotatedImageUrl`) per il viewer. La BLOB
   binaria evita l'+33% di base64 e si serve senza decodifica.
-- **Modelli**: riusa il motore di artest (`../server.mjs`): modello **visione**
+- **Modelli**: riusa il motore del viewer (`../server.mjs`): modello **visione**
   per riconoscimento opera, proposta dettagli e osservazione del crop; modello
   **testo** per le sezioni. Chiave `OPENROUTER_API_KEY` da `.env.local`/`.env`
   alla radice del repo.
@@ -31,15 +31,15 @@ un clic. La sorella **artest** resta l'app di lettura/esplorazione.
 
 ```bash
 pip install pillow reportlab   # dipendenze Python una tantum (vedi sotto)
-cd artest-creator
-node server.mjs            # http://127.0.0.1:18100  (porta: ARTEST_CREATOR_PORT)
+cd noesis-roads-creator
+node server.mjs            # http://127.0.0.1:18100  (porta: NOESIS_CREATOR_PORT)
 ```
 
 DB e cartella `uploads/` si creano da soli al primo avvio; sono ignorati da git
 (artefatti runtime), quindi su un sistema nuovo la libreria parte **vuota** e va
 riempita con la pipeline (vedi "Flusso d'uso"). Il DB demo con l'Annunciazione
 (stato `ready`) è presente solo localmente. La procedura completa d'installazione
-(requisiti, chiave API, secondo server artest, verifica) è nel README alla radice.
+(requisiti, chiave API, secondo server viewer, verifica) è nel README alla radice.
 
 ## Flusso d'uso (una sola richiesta all'utente: l'immagine)
 
@@ -113,7 +113,27 @@ disponibili come fallback).
 | GET | `/api/artworks/:id/pdf` · `/api/subjects/:id/pdf` · `/api/comparisons/:id/pdf` | **PDF "libro d'arte" della scheda** (vedi sotto) |
 | DELETE | `/api/artworks/:id` | elimina opera + contenuti (cascade) |
 
-`POST /publish` restituisce il JSON pronto da consumare in artest, con
+## API generiche — schede-lezione (nucleo Fase 2)
+
+Stesso server, namespace `/api/cards` + `/api/materie` (le legacy restano
+intatte). Editor guidato dallo schema: `GET /api/models?subject=…` dà lo
+schema, `PATCH …/sections/:sez` salva una sezione validata per tipo,
+`POST …/generate/:sez` la genera via LLM, `POST …/approve` applica il gate
+required, `GET …/pdf` esporta il PDF con `make_pdf.py` invariato.
+
+| Metodo | Percorso | Scopo |
+|---|---|---|
+| GET | `/api/materie` | materie disponibili (arte, filosofia) |
+| GET | `/api/models?subject=…` | modelli di una materia (schemi completi) |
+| GET/POST | `/api/cards[?modello=&stato=]` | elenco / nuova scheda `{modelloId, titolo}` |
+| GET/PATCH/DELETE | `/api/cards/:id` | dettaglio completo / titolo / elimina |
+| PATCH | `/api/cards/:id/sections/:sez` | revisione sezione `{corpo}`, validata per tipo |
+| POST | `/api/cards/:id/generate/:sez` | generazione LLM della sezione |
+| POST | `/api/cards/:id/approve` | `ready` (400 con `missing` se required vuote) |
+| POST/GET/DELETE | `/api/cards/:id/images[/:imgId]` | upload BLOB `{ruolo, imageDataUrl}` / binario / elimina |
+| GET | `/api/cards/:id/pdf` | PDF "libro d'arte" della scheda generica |
+
+`POST /publish` restituisce il JSON pronto da consumare nel viewer, con
 `imageUrl` e `annotatedImageUrl`, e l'array `similarWorks` (ogni voce con
 `imageUrl` al BLOB locale, `sourceUrl` alla pagina d'origine e `caption`).
 
@@ -148,7 +168,7 @@ Le thumbnail vengono **scaricate e salvate come BLOB** nella colonna
 card segnaposto e nella revisione si può incollare un **URL manuale**
 (PATCH con re-download). Attribuzione: `image_page`/`sourceUrl` rimandano alla
 pagina d'origine (Commons/MET, immagini in pubblico dominio). Il viewer
-artest genera le opere simili a runtime via `POST /api/similar` (stesso
+noesis-roads genera le opere simili a runtime via `POST /api/similar` (stesso
 resolver, hotlink).
 
 ### Dipendenza di sistema per l'immagine annotata

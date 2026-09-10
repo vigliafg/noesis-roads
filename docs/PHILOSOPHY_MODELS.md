@@ -37,7 +37,7 @@ critica (`text`), curiosità (`text`).
 - Tematica: il tempo (Agostino → Kant → Bergson → Heidegger).
 - Confronto: Platone vs Aristotele (stesso problema, due ontologie).
 
-## Linee guida prompt (comuni, come in artest)
+## Linee guida prompt (comuni, ereditate dal creator arte)
 
 Italiano chiaro e didattico; solo fatti ragionevolmente certi, mai inventare
 opere/date/citazioni; lunghezze vincolanti per sezione; risposta SOLO JSON

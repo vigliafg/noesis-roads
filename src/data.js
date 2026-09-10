@@ -1,5 +1,5 @@
 // Collezione dimostrativa inclusa nella pagina: viene usata SOLO come ripiego
-// quando il DB di artest-creator non ha opere pubblicate ("ready").
+// quando il DB di noesis-roads-creator non ha opere pubblicate ("ready").
 // Le schede vere arrivano da GET /api/library (lettura del DB SQLite).
 window.APP_DATA = {
   artworks: [

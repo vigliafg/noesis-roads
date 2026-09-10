@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# artest-creator — make_pdf.py
+# noesis-roads-creator — make_pdf.py
 # Genera un PDF "libro d'arte" per un tipo di scheda (opera | soggetto | confronto).
 # Uso: python3 make_pdf.py <input.json> <output.pdf>
 #   input.json: payload tipografico (vedi build*PdfPayload in server.mjs) con
@@ -133,7 +133,7 @@ class ImgBag:
     """Decodifica + (eventuale) crop delle immagini base64 in file temporanei."""
     def __init__(self, images=None):
         self.images = images or {}
-        self._dir = tempfile.mkdtemp(prefix='artest-pdf-')
+        self._dir = tempfile.mkdtemp(prefix='noesis-pdf-')
         self._n = 0
     def resolve(self, spec):
         if not spec:
@@ -274,7 +274,7 @@ class ArtDoc(BaseDocTemplate):
         canvas.setFillColor(GREY)
         canvas.setFont(SANS, 8)
         canvas.drawCentredString(W / 2, inset + 0.9 * cm,
-                                 'Scheda didattica · artest-creator')
+                                 'Scheda didattica · noesis-roads-creator')
 
     def _body(self, canvas, doc):
         W, H = A4
@@ -460,7 +460,7 @@ def main():
     try:
         doc = ArtDoc(out_path, payload, imgbag=bag)
         doc.title = payload.get('title', 'Scheda didattica')
-        doc.author = 'artest-creator'
+        doc.author = 'noesis-roads-creator'
         doc.build(build_story(payload, doc))
         print('OK_PDF {}'.format(os.path.getsize(out_path)))
     finally:

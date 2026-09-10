@@ -103,7 +103,7 @@ h1, h2 { font-family: 'Playfair Display', Georgia, serif; letter-spacing: -.055e
 
 .explore-page { min-height: 100vh; background: var(--paper); }
 .explore-header { max-width: 1280px; margin: 0 auto; padding: 24px 40px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); }
-.back-button, .header-info { border: 0; background: transparent; color: var(--muted); font-size: 11px; display: inline-flex; align-items: center; gap: 9px; padding: 7px 0; }
+.back-button, .header-info { border: 0; background: transparent; color: var(--muted); font-size: 11px; display: inline-flex; align-items: center; gap: 9px; padding: 7px 0; text-decoration: none; cursor: pointer; font-family: inherit; }
 .back-button:hover { color: var(--ink); }
 .back-icon { font-size: 19px; line-height: 0; }
 .explore-progress { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .14em; }
@@ -318,3 +318,12 @@ h1, h2 { font-family: 'Playfair Display', Georgia, serif; letter-spacing: -.055e
 .catalog-tab .tab-count{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--paper);color:var(--muted);font-size:10px;display:inline-flex;align-items:center;justify-content:center}
 .catalog-tab.active .tab-count{background:rgba(255,255,255,.25);color:#fff}
 @media(max-width:640px){.type-section{margin-top:36px}.type-title{font-size:22px}.type-section-head{align-items:start}}
+
+/* Schede generiche (SectionBlock/GenericCardView): riusano il design system esistente */
+.generic-points{margin:0;padding-left:22px;display:grid;gap:14px}
+.generic-points li::marker{color:var(--coral);font-weight:700}
+.generic-points strong{display:block;font-size:13px;margin-bottom:4px}
+.generic-points p{margin:0}
+.generic-figure{margin:0;text-align:center}
+.generic-figure img{max-width:100%;border-radius:10px;box-shadow:0 8px 24px rgba(30,42,44,.12)}
+.generic-figure figcaption{margin-top:10px;color:var(--muted);font-size:12px}

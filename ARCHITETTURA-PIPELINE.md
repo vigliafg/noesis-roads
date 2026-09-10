@@ -1,7 +1,7 @@
 # Architettura delle pipeline — documento di riferimento
 
 > Documento di memoria del progetto: descrive in modo stabile le pipeline dei tre
-> componenti (hub, artest, artest-creator). Da leggere prima di intervenire sul
+> componenti (hub, noesis-roads, noesis-roads-creator). Da leggere prima di intervenire sul
 > codice; da aggiornare quando una pipeline cambia. Complemento a `README.md`
 > (installazione/uso) e ai file `HANDOFF-*.md` (lavoro per data).
 
@@ -10,11 +10,11 @@
 | Componente | File | Porta default | Ruolo |
 |---|---|---|---|
 | **hub** | `launcher.mjs` | 18080 | pagina iniziale + supervisore dei due server (fork, health check, riavvio automatico) |
-| **artest** (viewer) | `server.mjs` + `src/` | 18000 (`APP_PORT`) | **lettura**: espone le schede pubblicate dal DB del creator, read-only |
-| **artest-creator** (authoring) | `artest-creator/server.mjs` | 18100 (`ARTEST_CREATOR_PORT`) | **produzione**: pipeline AI a step → schede SQLite `ready` |
+| **noesis-roads** (viewer) | `server.mjs` + `src/` | 18000 (`APP_PORT`) | **lettura**: espone le schede pubblicate dal DB del creator, read-only |
+| **noesis-roads-creator** (authoring) | `noesis-roads-creator/server.mjs` | 18100 (`NOESIS_CREATOR_PORT`) | **produzione**: pipeline AI a step → schede SQLite `ready` |
 
-Flusso di valore: `artest-creator` crea le schede → DB SQLite condiviso
-(`artest-creator/data/artest-creator.db`) → `artest` le legge **in sola lettura** e
+Flusso di valore: `noesis-roads-creator` crea le schede → DB SQLite condiviso
+(`noesis-roads-creator/data/noesis-roads-creator.db`) → `noesis-roads` le legge **in sola lettura** e
 le presenta; l'hub tiene accesi e configurati i due programmi.
 
 **Decisioni architetturali da rispettare** (valgono per tutte le pipeline):
@@ -30,9 +30,9 @@ le presenta; l'hub tiene accesi e configurati i due programmi.
   in `.env.local`/`.env` alla radice (mai nel client, mai committata).
 - **Politica anti-allucinazione**: la *curiosità* è opzionale — se il modello non
   ha un fatto verificato specifico la lascia vuota. Non forzarla mai.
-- **Separazione write/read**: il creator possiede il DB e scrive; artest apre la
+- **Separazione write/read**: il creator possiede il DB e scrive; il viewer apre la
   **stessa funzione di accesso in `readOnly: true`** (accessor `RO` in
-  `artest-creator/db.mjs`, pattern `openReadonly`) e non tocca mai lo schema.
+  `noesis-roads-creator/db.mjs`, pattern `openReadonly`) e non tocca mai lo schema.
 
 ---
 
@@ -42,8 +42,8 @@ L'hub non genera contenuti: è **orchestratore di processi**.
 
 1. **Avvio** — `loadLocalEnv()` carica `.env.local` poi `.env` (prima occorrenza
    vince); `createHubServer()` fa `fork` di `server.mjs` (viewer) e
-   `artest-creator/server.mjs` (creator) come processi figli `silent` (stdout/stderr
-   riversati nel launcher) e serve la pagina hub su `ARTEST_HUB_PORT` (18080).
+   `noesis-roads-creator/server.mjs` (creator) come processi figli `silent` (stdout/stderr
+   riversati nel launcher) e serve la pagina hub su `NOESIS_HUB_PORT` (18080).
 2. **Supervisione** — se un figlio crasha viene riavviato automaticamente dopo
    1,5 s (flag `expectExit` evita respawn sugli stop pianificati);
    `SIGTERM → SIGKILL` dopo 5 s allo shutdown; `Ctrl+C` spegne tutto.
@@ -56,12 +56,12 @@ L'hub non genera contenuti: è **orchestratore di processi**.
 
 Config fields (mappa pannello → env): `OPENROUTER_API_KEY`, `OPENROUTER_ENDPOINT`,
 `OPENROUTER_VISION_MODEL`, `OPENROUTER_TEXT_MODEL`, `OPENROUTER_WEB_SEARCH`,
-`APP_HOST`, `APP_PORT`, `ARTEST_CREATOR_PORT`, `ARTEST_HUB_PORT`,
-`ARTEST_CREATOR_DB`, `OPENROUTER_RPM`.
+`APP_HOST`, `APP_PORT`, `NOESIS_CREATOR_PORT`, `NOESIS_HUB_PORT`,
+`NOESIS_CREATOR_DB`, `OPENROUTER_RPM` (nomi `ARTEST_*` precedenti accettati come fallback).
 
 ---
 
-## 2. Pipeline di artest (viewer) — lettura, zero generazione
+## 2. Pipeline di noesis-roads (viewer) — lettura, zero generazione
 
 Consumatore finale: legge solo schede con `status = 'ready'`.
 
@@ -77,7 +77,12 @@ Consumatore finale: legge solo schede con `status = 'ready'`.
    grigi, toggle pulita/annotata), `SubjectView.jsx` (timeline per epoche + galleria
    opere), `ComparisonView.jsx` (due opere affiancate + elenchi). Tab
    Studio/Approfondimento precompilate dalla scheda.
-4. **Flusso legacy di ripiego** — solo per opere senza contenuti pubblicati:
+4. **PDF in sola lettura** — `GET /api/artworks/:id/pdf`, `/api/subjects/:id/pdf`,
+   `/api/comparisons/:id/pdf`, `/api/cards/:id/pdf`: gli stessi builder puri del
+   creator (`noesis-roads-creator/pdf-payloads.mjs`, con accessor RO) + `make_pdf.py`
+   invariato. Il viewer non ha bisogno del creator acceso per esportare; bottone
+   ⬇ PDF nell'header delle 4 viste (nascosto per la demo offline).
+5. **Flusso legacy di ripiego** — solo per opere senza contenuti pubblicati:
    `POST /api/overview` (testo dipinto+artista) e `POST /api/analyze`
    (visione del dettaglio → spiegazione didattica, risposta JSON normalizzata).
    L'immagine non lascia mai il backend; la chiave non è esposta al client.
@@ -87,10 +92,10 @@ Funziona senza chiave API per le schede già pubblicate.
 
 ---
 
-## 3. Pipeline di artest-creator (authoring + AI)
+## 3. Pipeline di noesis-roads-creator (authoring + AI)
 
 Tre tipi di scheda, stesso DB, stesso motore AI (`callModel` importato da
-`../server.mjs`). Le schede diventano visibili ad artest solo quando `ready`.
+`../server.mjs`). Le schede diventano visibili al viewer solo quando `ready`.
 
 ### 3a. Scheda «opera» — pipeline automatica a 5 fasi
 
@@ -174,7 +179,7 @@ Alla pubblicazione viene generata la **miniatura composita** via
 
 - Test: `node --test test_server.mjs` (backend, accessor RO, rotte, PDF).
 - Avvio consigliato: `node launcher.mjs` (hub 18080 → viewer 18000, creator 18100).
-  Manuale: `node server.mjs` e `node artest-creator/server.mjs`.
+  Manuale: `node server.mjs` e `node noesis-roads-creator/server.mjs`.
 - DB e `uploads/` si creano da soli, ignorati da git: su un sistema nuovo la
   libreria parte vuota e si riempie dal creator.
 - I preview Freebuff non sopravvivono a un restart: rilanciare i server e

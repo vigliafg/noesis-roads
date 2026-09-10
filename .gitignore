@@ -2,9 +2,9 @@
 .env.local
 __pycache__/
 
-# artest-creator (runtime artifacts: DB SQLite + immagini caricate)
-artest-creator/data/
-artest-creator/uploads/
+# noesis-roads-creator (runtime artifacts: DB SQLite + immagini caricate)
+noesis-roads-creator/data/
+noesis-roads-creator/uploads/
 
 # Freebuff preview server logs
 .freebuff/*.log

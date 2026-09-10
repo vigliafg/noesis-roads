@@ -1,4 +1,4 @@
-// artest-creator — server HTTP (zero dipendenze) + API CRUD + generazione LLM
+// noesis-roads-creator — server HTTP (zero dipendenze) + API CRUD + generazione LLM
 import { createServer } from 'node:http';
 import { readFile, writeFile, stat, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -19,18 +19,28 @@ import {
   replaceSubjectChapters, listSubjectChapters, getFullSubject, replaceSubjectWorks, listSubjectWorks, getSubjectWorkImage,
   createComparison, getComparison, listComparisons, updateComparison, deleteComparison, approveComparison, setComparisonThumb,
   setComparisonSide, listComparisonSides, getComparisonSide, getComparisonSideImage, getComparisonThumb,
-  replaceComparisonPoints, listComparisonPoints, getFullComparison
+  replaceComparisonPoints, listComparisonPoints, getFullComparison,
+  // Nucleo generico (Fase 2): materie / modelli / schede-lezione / sezioni / immagini
+  listMaterie, listModelli, getModello, seedCore, createScheda, getScheda, getSchedaFull,
+  listSchede, updateScheda, deleteScheda, saveSezione, getSezione, approveScheda,
+  addImmagine, listImmagini, getImmagine, deleteImmagine
 } from './db.mjs';
 import { callModel, VISION_MODEL, TEXT_MODEL, getOpenRouterApiKey,
   buildVisionPrompt, buildOverviewPrompt, buildTextPrompt, buildSimilarPrompt,
   normalizeAnalysis, normalizeOverview, normalizeSimilar, resolveSimilarImages } from '../server.mjs';
+import { listMaterie as materieRegistry, listModelli as modelliRegistry } from '../core/models.mjs';
+import { validateBody, isBodyEmpty } from '../core/sectionTypes.mjs';
+import { buildSectionPrompt } from '../core/prompts.mjs';
 
 const execFileAsync = promisify(execFile);
-const PORT = Number(process.env.ARTEST_CREATOR_PORT || 18100);
+const PORT = Number(process.env.NOESIS_CREATOR_PORT || process.env.ARTEST_CREATOR_PORT || 18100);
 const HOST = process.env.APP_HOST || '127.0.0.1';
 const PUBLIC_DIR = join(APP_ROOT, 'public');
 
 initSchema();
+// Nucleo generico: seed idempotente dal registry dichiarativo (core/models.mjs).
+// Le tabelle legacy restano intatte; materie e modelli vengono (ri)allineati a ogni avvio.
+seedCore({ materie: materieRegistry(), modelli: [...modelliRegistry('arte'), ...modelliRegistry('filosofia')] });
 
 // ---------- helpers ----------
 function json(res, status, payload) {
@@ -288,7 +298,7 @@ function handleApi(req, res, urlPath) {
       for (const w of resolved) {
         if (w.imageStatus === 'ok' && w.imageUrl) {
           try {
-            const resp = await fetch(w.imageUrl, { headers: { 'User-Agent': 'artest-didattico/1.0 (local)' }, redirect: 'follow' });
+            const resp = await fetch(w.imageUrl, { headers: { 'User-Agent': 'noesis-roads-didattico/1.0 (local)' }, redirect: 'follow' });
             if (resp.ok) {
               const buf = Buffer.from(await resp.arrayBuffer());
               if (buf.length > 0) { w.imageData = buf; w.imageMime = String(resp.headers.get('content-type') || 'image/jpeg').split(';')[0]; }
@@ -320,7 +330,7 @@ function handleApi(req, res, urlPath) {
         } else {
           saved = updateSimilarWork(similarId, { imageUrl: url, imagePage: input.imagePage !== undefined ? String(input.imagePage) : saved.imagePage });
           try {
-            const resp = await fetch(url, { headers: { 'User-Agent': 'artest-didattico/1.0 (local)' }, redirect: 'follow' });
+            const resp = await fetch(url, { headers: { 'User-Agent': 'noesis-roads-didattico/1.0 (local)' }, redirect: 'follow' });
             if (resp.ok) {
               const buf = Buffer.from(await resp.arrayBuffer());
               if (buf.length > 0) saved = updateSimilarWork(similarId, { imageData: buf, imageMime: String(resp.headers.get('content-type') || 'image/jpeg').split(';')[0], imageStatus: 'ok' });
@@ -516,7 +526,7 @@ function handleApi(req, res, urlPath) {
     }).catch(e => { console.error('ERR annotate:', e); err(res, 500, e.message); });
   }
 
-  // POST /api/artworks/:id/publish — esporta JSON pronto per artest
+  // POST /api/artworks/:id/publish — esporta JSON pronto per il viewer
   if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'artworks' && parts[3] === 'publish') {
     const published = publishArtwork(parts[2]);
     if (!published) return err(res, 400, 'Opera non pronta: genera e approva prima i contenuti');
@@ -642,7 +652,7 @@ function handleApi(req, res, urlPath) {
       for (const w of resolved) {
         if (w.imageStatus === 'ok' && w.imageUrl) {
           try {
-            const resp = await fetch(w.imageUrl, { headers: { 'User-Agent': 'artest-didattico/1.0 (local)' }, redirect: 'follow' });
+            const resp = await fetch(w.imageUrl, { headers: { 'User-Agent': 'noesis-roads-didattico/1.0 (local)' }, redirect: 'follow' });
             if (resp.ok) {
               const buf = Buffer.from(await resp.arrayBuffer());
               if (buf.length > 0) { w.imageData = buf; w.imageMime = String(resp.headers.get('content-type') || 'image/jpeg').split(';')[0]; }
@@ -759,7 +769,7 @@ function handleApi(req, res, urlPath) {
           } else if (s.imageUrl) {
             imageUrl = String(s.imageUrl).trim();
             try {
-              const resp = await fetch(imageUrl, { headers: { 'User-Agent': 'artest-didattico/1.0 (local)' }, redirect: 'follow' });
+              const resp = await fetch(imageUrl, { headers: { 'User-Agent': 'noesis-roads-didattico/1.0 (local)' }, redirect: 'follow' });
               if (resp.ok) {
                 const buf = Buffer.from(await resp.arrayBuffer());
                 if (buf.length > 0) { imageData = buf; imageMime = String(resp.headers.get('content-type') || 'image/jpeg').split(';')[0]; imageStatus = 'ok'; }
@@ -842,6 +852,166 @@ function handleApi(req, res, urlPath) {
     if (!full) return err(res, 404, 'Confronto non trovato');
     if (!full.intro && !(full.points || []).length) return err(res, 400, 'Genera e salva prima i contenuti: il PDF esporta la scheda completa.');
     return sendPdf(res, buildComparisonPdfPayload(full), slugify(full.title || 'confronto') + '.pdf');
+  }
+
+  // ================= Nucleo generico: schede-lezione (Fase 2, additivo) =================
+  // Namespace deciso: /api/cards + /api/materie (le legacy /api/subjects arte restano intatte).
+  function cardPublic(c) {
+    return { id: c.id, modelloId: c.modelloId, titolo: c.titolo, stato: c.stato, createdAt: c.createdAt, updatedAt: c.updatedAt };
+  }
+  function cardFullPublic(id) {
+    const full = getSchedaFull(id);
+    if (!full) return null;
+    return {
+      ...cardPublic(full),
+      modello: full.modello,
+      sezioni: full.sezioni,
+      immagini: (full.immagini || []).map((m) => ({ ...m, url: '/api/cards/' + id + '/images/' + m.id }))
+    };
+  }
+
+  // GET /api/materie — materie disponibili
+  if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'materie') {
+    return json(res, 200, { materie: listMaterie() });
+  }
+
+  // GET /api/models?subject=filosofia — modelli di una materia (schemi completi per l'editor generico)
+  if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'models') {
+    const subject = new URL(req.url, 'http://localhost').searchParams.get('subject') || '';
+    if (!subject) return err(res, 400, 'Parametro subject obbligatorio (es. ?subject=filosofia)');
+    return json(res, 200, { models: listModelli(subject) });
+  }
+
+  // GET /api/cards?modello=&stato= — elenco schede-lezione
+  if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'cards') {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const cards = listSchede({ modelloId: q.get('modello') || null, stato: q.get('stato') || null });
+    return json(res, 200, { cards: cards.map(cardPublic) });
+  }
+
+  // POST /api/cards { modelloId, titolo?, id? } — nuova scheda-lezione
+  if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'cards') {
+    return readBody(req).then((input) => {
+      if (!input.modelloId) return err(res, 400, 'modelloId obbligatorio');
+      if (!getModello(input.modelloId)) return err(res, 400, 'Modello sconosciuto: ' + input.modelloId);
+      try {
+        const created = createScheda({ id: input.id || null, modelloId: input.modelloId, titolo: input.titolo || '' });
+        return json(res, 201, { card: cardPublic(created) });
+      } catch (e) {
+        return err(res, String(e.message || '').includes('già una scheda') ? 409 : 400, e.message);
+      }
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // GET /api/cards/:id — dettaglio completo (modello + sezioni + immagini)
+  if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'cards') {
+    const full = cardFullPublic(parts[2]);
+    if (!full) return err(res, 404, 'Scheda non trovata');
+    return json(res, 200, full);
+  }
+
+  // PATCH /api/cards/:id { titolo } — revisione metadati
+  if (method === 'PATCH' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'cards') {
+    return readBody(req).then((input) => {
+      const saved = updateScheda(parts[2], { titolo: input.titolo !== undefined ? String(input.titolo) : undefined });
+      if (!saved) return err(res, 404, 'Scheda non trovata');
+      return json(res, 200, { card: cardPublic(saved) });
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // DELETE /api/cards/:id
+  if (method === 'DELETE' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'cards') {
+    if (!getScheda(parts[2])) return err(res, 404, 'Scheda non trovata');
+    deleteScheda(parts[2]);
+    return json(res, 200, { ok: true });
+  }
+
+  // PATCH /api/cards/:id/sections/:sez { corpo } — revisione di una sezione (validata per tipo)
+  if (method === 'PATCH' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'sections') {
+    return readBody(req).then((input) => {
+      const scheda = getScheda(parts[2]);
+      if (!scheda) return err(res, 404, 'Scheda non trovata');
+      const modello = getModello(scheda.modelloId);
+      const def = modello && modello.schema.sections.find((s) => s.key === parts[4]);
+      if (!def) return err(res, 404, 'Sezione sconosciuta per questo modello: ' + parts[4]);
+      const corpo = (input && typeof input === 'object' && input.corpo !== undefined) ? input.corpo : input;
+      const errors = validateBody(def.type, corpo);
+      if (errors.length) return err(res, 400, 'Sezione non valida: ' + errors.join('; '));
+      const saved = saveSezione(parts[2], parts[4], corpo);
+      return json(res, 200, { section: saved });
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // POST /api/cards/:id/generate/:sez — genera una sezione via LLM
+  if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'generate') {
+    const scheda = getScheda(parts[2]);
+    if (!scheda) return err(res, 404, 'Scheda non trovata');
+    const modello = getModello(scheda.modelloId);
+    const def = modello && modello.schema.sections.find((s) => s.key === parts[4]);
+    if (!def) return err(res, 404, 'Sezione sconosciuta per questo modello: ' + parts[4]);
+    if (def.type === 'image') return err(res, 400, 'La sezione immagine si compila con upload, non con generazione.');
+    const apiKey = getOpenRouterApiKey();
+    if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
+    return readBody(req).then(async (input) => {
+      const prompt = buildSectionPrompt({ modello: modello.schema, sezione: def, titoloScheda: scheda.titolo, livello: String((input && input.livello) || '') });
+      try {
+        const raw = await callModel(TEXT_MODEL, [{ type: 'text', text: prompt }], apiKey);
+        const corpo = normalizeSectionBody(def.type, raw.data);
+        const warnings = validateBody(def.type, corpo);
+        const saved = saveSezione(parts[2], parts[4], corpo);
+        return json(res, 200, { section: saved, warnings });
+      } catch (e) { console.error('ERR genSection:', e); return err(res, 500, e.message); }
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // POST /api/cards/:id/approve — ready (+ gate required come il legacy)
+  if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'approve') {
+    const scheda = getScheda(parts[2]);
+    if (!scheda) return err(res, 404, 'Scheda non trovata');
+    const result = approveScheda(parts[2]);
+    if (!result.ok) return err(res, 400, 'Genera e salva prima i contenuti: sezioni mancanti: ' + result.missing.join(', '));
+    return json(res, 200, { ok: true, status: 'ready', card: cardPublic(result.scheda) });
+  }
+
+  // POST /api/cards/:id/images { ruolo, imageDataUrl } — upload immagine (BLOB)
+  if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'images') {
+    if (!getScheda(parts[2])) return err(res, 404, 'Scheda non trovata');
+    return readBody(req).then((input) => {
+      const ruolo = String(input.ruolo || '').trim();
+      if (!ruolo) return err(res, 400, 'ruolo obbligatorio');
+      const match = String(input.imageDataUrl || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      if (!match) return err(res, 400, 'imageDataUrl non valido: atteso data:image/...;base64,...');
+      const buf = Buffer.from(match[2], 'base64');
+      if (!buf.length) return err(res, 400, 'Immagine vuota');
+      const id = addImmagine(parts[2], ruolo, buf, match[1]);
+      const row = getImmagine(id);
+      return json(res, 201, { image: { id: row.id, ruolo: row.ruolo, mime: row.mime, bytes: row.data ? row.data.length : 0, url: '/api/cards/' + parts[2] + '/images/' + row.id } });
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // GET /api/cards/:id/images/:imgId — BLOB immagine
+  if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'images') {
+    const img = getImmagine(Number(parts[4]));
+    if (!img || !img.data || String(img.schedaId) !== String(parts[2])) return err(res, 404, 'Immagine non disponibile');
+    const buf = Buffer.from(img.data);
+    res.writeHead(200, { 'Content-Type': img.mime, 'Content-Length': buf.length, 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' });
+    return res.end(buf);
+  }
+
+  // DELETE /api/cards/:id/images/:imgId
+  if (method === 'DELETE' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'images') {
+    const img = getImmagine(Number(parts[4]));
+    if (!img || String(img.schedaId) !== String(parts[2])) return err(res, 404, 'Immagine non disponibile');
+    deleteImmagine(Number(parts[4]));
+    return json(res, 200, { ok: true });
+  }
+
+  // GET|HEAD /api/cards/:id/pdf — PDF "libro d'arte" della scheda generica
+  if ((method === 'GET' || method === 'HEAD') && parts.length === 4 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'pdf') {
+    const full = getSchedaFull(parts[2]);
+    if (!full) return err(res, 404, 'Scheda non trovata');
+    if (!(full.sezioni || []).length) return err(res, 400, 'Genera e salva prima i contenuti: il PDF esporta la scheda completa.');
+    return sendPdf(res, buildGenericPdfPayload(full), slugify(full.titolo || 'scheda') + '.pdf');
   }
 
   return err(res, 404, 'Endpoint non trovato: ' + method + ' ' + urlPath);
@@ -984,195 +1154,15 @@ async function renderAnnotated(artwork) {
   }
 }
 
-// ---------- Esportazione PDF "libro d'arte" (payload → make_pdf.py) ----------
-function imageRef(images, key, buf, mime) {
-  if (buf == null) return null;
-  // Il DB (node:sqlite) restituisce i BLOB come Uint8Array, non Buffer;
-  // i test/mock possono passare Buffer oppure una stringa base64 già pronta.
-  let data;
-  if (Buffer.isBuffer(buf)) data = buf;
-  else if (buf instanceof Uint8Array) data = Buffer.from(buf);
-  else if (typeof buf === 'string') data = Buffer.from(buf, 'base64');
-  else data = Buffer.from(buf);
-  if (!data.length) return null;
-  images[key] = { data: data.toString('base64'), mime: mime || 'image/jpeg' };
-  return { ref: key };
-}
-
-export function buildArtworkPdfPayload(full, io = {}) {
-  const images = {};
-  const ref = (key, data, mime) => imageRef(images, key, data, mime);
-  const imgs = io.imageData ? io.imageData(full.id) : getArtworkImageData(full.id);
-  const clean = imgs && imgs.clean;
-  const annotated = imgs && imgs.annotated;
-  const coverImage = clean ? ref('clean', clean.data, clean.mime) : null;
-  const annotatedRef = annotated ? ref('annotated', annotated.data, annotated.mime) : null;
-  const getSim = io.similarImage || getSimilarImage;
-  const sections = [];
-  let n = 0;
-  const chapter = (title) => { n += 1; sections.push({ t: 'chapter', n, title }); };
-
-  chapter('Presentazione');
-  if (full.overview?.painting) sections.push({ t: 'h2', text: 'Il dipinto' }, { t: 'p', text: full.overview.painting });
-  if (full.overview?.artist) sections.push({ t: 'h2', text: 'L’artista' }, { t: 'p', text: full.overview.artist });
-
-  if (annotatedRef || coverImage) {
-    chapter('L’opera');
-    sections.push({ t: 'image', image: annotatedRef || coverImage, caption: full.title + ' — ' + (full.artist || 'artista ignoto'), fullpage: true });
-  }
-
-  for (const d of (full.details || [])) {
-    chapter(d.title);
-    const studio = d.tabs?.studio?.content || {};
-    const appr = d.tabs?.approfondimento?.content || {};
-    if (coverImage && d.region) {
-      sections.push({ t: 'image', image: { ref: 'clean', crop: d.region }, caption: d.title + (d.category ? ' (' + d.category + ')' : '') });
-    }
-    if (studio.observation) sections.push({ t: 'h2', text: 'Cosa vedi' }, { t: 'p', text: studio.observation });
-    if (studio.meaning) sections.push({ t: 'h2', text: 'Cosa significa' }, { t: 'p', text: studio.meaning });
-    if (studio.relation) sections.push({ t: 'h2', text: 'In relazione all’opera' }, { t: 'p', text: studio.relation });
-    if (studio.lookAgain) sections.push({ t: 'kv', items: [['Guarda ancora', studio.lookAgain]] });
-    if (appr.curiosity) sections.push({ t: 'h2', text: 'Una curiosità' }, { t: 'p', text: appr.curiosity });
-    if (appr.comparisons) sections.push({ t: 'h2', text: 'Confronti' }, { t: 'p', text: appr.comparisons });
-    if (appr.openQuestions) sections.push({ t: 'h2', text: 'Questioni aperte' }, { t: 'p', text: appr.openQuestions });
-    if (appr.technique) sections.push({ t: 'h2', text: 'Tecnica e materia' }, { t: 'p', text: appr.technique });
-    if (appr.lookAgain) sections.push({ t: 'kv', items: [['Guarda ancora', appr.lookAgain]] });
-  }
-
-  const similar = (full.similarWorks || []).filter(w => w.title);
-  if (similar.length) {
-    chapter('Opere simili');
-    sections.push({ t: 'gallery', items: similar.map(w => {
-      const img = w.hasImage ? getSim(full.id, w.id) : null;
-      return {
-        image: img ? ref('sim' + w.id, img.data, img.mime) : null,
-        caption: (w.title || '') + (w.artist ? ' — ' + w.artist : '') + (w.date ? ', ' + w.date : ''),
-        meta: [w.museum, w.caption].filter(Boolean).join(' · ')
-      };
-    }) });
-  }
-
-  const sources = (full.sources || []).filter(s => s.title || s.url);
-  if (sources.length) {
-    chapter('Fonti');
-    sections.push({ t: 'kv', items: sources.map(s => [s.title || s.url, s.url]) });
-  }
-
-  return {
-    type: 'opera',
-    eyebrow: 'Scheda didattica · opera',
-    title: full.title || 'Opera senza titolo',
-    subtitle: full.artist || '',
-    meta: [full.date, full.period, full.technique, full.institution, full.location].filter(Boolean),
-    coverImage,
-    images,
-    sections
-  };
-}
-
-export function buildSubjectPdfPayload(full, io = {}) {
-  const images = {};
-  const sections = [];
-  let n = 0;
-  const chapter = (title) => { n += 1; sections.push({ t: 'chapter', n, title }); };
-  const getWorkImage = io.subjectWorkImage || getSubjectWorkImage;
-
-  if (full.intro) chapter('Introduzione'), sections.push({ t: 'p', text: full.intro });
-  if (full.origins) chapter('Origini e fonti iconografiche'), sections.push({ t: 'p', text: full.origins });
-  if ((full.chapters || []).length) {
-    chapter('L’evoluzione per epoche');
-    for (const c of full.chapters) {
-      sections.push({ t: 'h2', text: c.era || 'Epoca' }, { t: 'p', text: c.text || '' });
-    }
-  }
-  const works = (full.works || []).filter(w => w.title);
-  if (works.length) {
-    chapter('Opere rappresentative');
-    sections.push({ t: 'gallery', items: works.map(w => {
-      const img = w.hasImage ? getWorkImage(full.id, w.id) : null;
-      return {
-        image: img ? imageRef(images, 'sw' + w.id, img.data, img.mime) : null,
-        caption: (w.title || '') + (w.artist ? ' — ' + w.artist : '') + (w.date ? ', ' + w.date : ''),
-        meta: [w.museum, w.caption].filter(Boolean).join(' · ')
-      };
-    }) });
-  }
-  let symbols = [];
-  try { symbols = JSON.parse(full.symbols || '[]'); } catch { symbols = []; }
-  if (symbols.length) {
-    chapter('Attributi e simboli ricorrenti');
-    sections.push({ t: 'kv', items: symbols.map(s => [s.symbol || '', s.meaning || '']) });
-  }
-  if (full.interpretations) chapter('Interpretazioni e varianti'), sections.push({ t: 'p', text: full.interpretations });
-  if (full.curiosities) chapter('Curiosità e questioni aperte'), sections.push({ t: 'p', text: full.curiosities });
-
-  return {
-    type: 'soggetto',
-    eyebrow: 'Scheda didattica · soggetto nella storia dell’arte',
-    title: full.name || 'Soggetto',
-    subtitle: '',
-    meta: [],
-    coverImage: works.length && works[0].hasImage ? { ref: 'sw' + works[0].id } : null,
-    images,
-    sections
-  };
-}
-
-export function buildComparisonPdfPayload(full, io = {}) {
-  const images = {};
-  const sections = [];
-  let n = 0;
-  const chapter = (title) => { n += 1; sections.push({ t: 'chapter', n, title }); };
-  const getArtworkImgs = io.artworkImageData || getArtworkImageData;
-  const getSideImage = io.comparisonSideImage || getComparisonSideImage;
-  const getThumb = io.comparisonThumb || getComparisonThumb;
-  const sideMeta = (s) => [s.artist, s.date, s.museum].filter(Boolean).join(' · ');
-  const sideOf = (letter) => (full.sides || []).find(s => s.side === letter) || {};
-  const a = sideOf('a'), b = sideOf('b');
-
-  const sideImage = (letter, s) => {
-    if (s.source === 'library' && s.artworkId) {
-      const imgs = getArtworkImgs(s.artworkId);
-      if (imgs && imgs.clean) return imageRef(images, 'side' + letter, imgs.clean.data, imgs.clean.mime);
-    }
-    const img = getSideImage(full.id, letter);
-    if (img) return imageRef(images, 'side' + letter, img.data, img.mime);
-    return null;
-  };
-  const imgA = sideImage('a', a), imgB = sideImage('b', b);
-
-  const thumbRow = getThumb(full.id);
-  const coverImage = thumbRow ? imageRef(images, 'thumb', thumbRow.data, thumbRow.mime) : (imgA || imgB);
-
-  chapter('Le due opere');
-  sections.push({ t: 'pair',
-    a: { image: imgA, caption: a.title || 'Opera A', meta: [sideMeta(a)].filter(Boolean) },
-    b: { image: imgB, caption: b.title || 'Opera B', meta: [sideMeta(b)].filter(Boolean) }
-  });
-
-  if (full.intro) chapter('Introduzione al confronto'), sections.push({ t: 'p', text: full.intro });
-  const points = full.points || [];
-  const similar = points.filter(p => p.kind === 'similar');
-  const different = points.filter(p => p.kind === 'different');
-  if (similar.length) chapter('Punti in comune'), sections.push({ t: 'points', items: similar.map(p => ({ title: p.title, text: p.text })) });
-  if (different.length) chapter('Differenze'), sections.push({ t: 'points', items: different.map(p => ({ title: p.title, text: p.text })) });
-  if (full.technique) chapter('Tecnica a confronto'), sections.push({ t: 'p', text: full.technique });
-  if (full.context) chapter('Contesto storico-artistico'), sections.push({ t: 'p', text: full.context });
-  if (full.critique) chapter('Interpretazione critica'), sections.push({ t: 'p', text: full.critique });
-  if (full.curiosities) chapter('Curiosità'), sections.push({ t: 'p', text: full.curiosities });
-
-  const typeLabel = full.comparisonType === 'same-artist' ? 'stesso artista, fasi diverse' : 'stesso soggetto, artisti diversi';
-  return {
-    type: 'confronto',
-    eyebrow: 'Scheda didattica · faccia a faccia',
-    title: full.title || 'Confronto',
-    subtitle: typeLabel,
-    meta: [a.title, b.title].filter(Boolean).map((t, i) => (i === 0 ? 'A · ' : 'B · ') + t),
-    coverImage,
-    images,
-    sections
-  };
-}
+// ---------- Esportazione PDF: builder puri in ./pdf-payloads.mjs (condivisi col viewer) ----------
+export {
+  imageRef,
+  normalizeSectionBody,
+  buildArtworkPdfPayload, buildSubjectPdfPayload, buildComparisonPdfPayload, buildGenericPdfPayload,
+} from './pdf-payloads.mjs';
+import {
+  buildArtworkPdfPayload, buildSubjectPdfPayload, buildComparisonPdfPayload, buildGenericPdfPayload,
+} from './pdf-payloads.mjs';
 
 async function renderPdf(payload) {
   const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -1403,13 +1393,13 @@ async function renderComposeThumb(comparison) {
 }
 
 // ---------- static + avvio ----------
-// URL dell'hub per il bottone «← Hub» della UI: porta letta da ARTEST_HUB_PORT
+// URL dell'hub per il bottone «← Hub» della UI: porta letta da NOESIS_HUB_PORT (fallback ARTEST_HUB_PORT)
 // (default 18080, come launcher.mjs), host preso dalla richiesta in modo che il
 // link funzioni anche in LAN. Iniettato sostituendo il segnaposto <!--APP_CONFIG-->.
 function hubUrlFor(req) {
   const hostHeader = String((req && req.headers && req.headers.host) || '').trim();
   const hostname = hostHeader.split(':')[0] || '127.0.0.1';
-  const hubPort = Number(process.env.ARTEST_HUB_PORT || 18080);
+  const hubPort = Number(process.env.NOESIS_HUB_PORT || process.env.ARTEST_HUB_PORT || 18080);
   return `http://${hostname}:${hubPort}/`;
 }
 
@@ -1446,7 +1436,7 @@ export function createCreatorServer() {
     if (urlPath === '/api/status') {
       const full = listArtworks().length;
       return json(res, 200, {
-        app: 'artest-creator',
+        app: 'noesis-roads-creator',
         configured: Boolean(getOpenRouterApiKey()),
         visionModel: VISION_MODEL,
         textModel: TEXT_MODEL,
@@ -1475,7 +1465,7 @@ const server = createCreatorServer();
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(PORT, HOST, () => {
-    console.log(`artest-creator: http://${HOST}:${PORT}`);
+    console.log(`noesis-roads-creator: http://${HOST}:${PORT}`);
     console.log(`DB: SQLite (node:sqlite)`);
     console.log(`Modello visione: ${VISION_MODEL}`);
     console.log(`Modello testo: ${TEXT_MODEL}`);

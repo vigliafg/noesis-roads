@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>artest-creator · crea le schede didattiche</title>
+<title>noesis-roads-creator · crea le schede didattiche</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
@@ -201,7 +201,7 @@ h1,h2,h3{font-family:'Playfair Display',Georgia,serif;letter-spacing:-.04em}
 .sim-slide figcaption span,.sim-slide figcaption small{display:block;color:var(--muted);font-size:10px;margin-top:3px}
 .sim-slide figcaption p{margin:7px 0 0;color:var(--ink);font-size:11px;line-height:1.5}
 /* ---- Schede Soggetto e Faccia a faccia ---- */
-/* Filtri a tab della home (come il catalogo di artest) */
+/* Filtri a tab della home (come il catalogo del viewer) */
 .home-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0 6px}
 .home-tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--white);color:var(--ink);border-radius:30px;padding:9px 14px;font-size:11px;font-weight:700;cursor:pointer;transition:border-color .15s,background .15s}
 .home-tab:hover{border-color:var(--coral);background:#fff9f5}
@@ -270,7 +270,7 @@ h1,h2,h3{font-family:'Playfair Display',Georgia,serif;letter-spacing:-.04em}
 <script>
 'use strict';
 /* ================= stato ================= */
-var state = { view: 'home', homeTab: 'all', artwork: null, list: [], busy: {}, log: [] };
+var state = { view: 'home', homeTab: 'all', artwork: null, list: [], cards: [], busy: {}, log: [] };
 
 /* ================= api ================= */
 function api(path, opts) {
@@ -389,6 +389,7 @@ function render() {
   if (state.view === 'viewer') return renderViewer();
   if (state.view === 'subject-studio') return renderSubjectStudio();
   if (state.view === 'comparison-studio') return renderComparisonStudio();
+  if (state.view === 'card-studio') return renderCardStudio();
   if (state.view === 'subject-viewer') return renderSubjectViewer();
   if (state.view === 'comparison-viewer') return renderComparisonViewer();
 }
@@ -400,14 +401,14 @@ function topbar(title, rightHtml) {
   var hub = (window.CREATOR_DATA && window.CREATOR_DATA.hubUrl) || ('http://' + (location.hostname || '127.0.0.1') + ':18080/');
   var right = rightHtml || '';
   var h1 = title ? '<h1 class="page-title topbar-title">' + esc(title) + '</h1>' : '';
-  return '<header class="topbar"><div class="left"><a class="brand" href="#" data-nav="home"><span class="brand-mark"><i></i><i></i><i></i></span>artest-creator</a>' +
+  return '<header class="topbar"><div class="left"><a class="brand" href="#" data-nav="home"><span class="brand-mark"><i></i><i></i><i></i></span>noesis-roads-creator</a>' +
     '<button class="btn small ghost hub-btn" onclick="location.href=' + JSON.stringify(hub).replace(/"/g, '&quot;') + '">← Hub</button></div>' +
     '<div class="right">' + right + '</div></header>' + h1;
 }
 
 /* ---------- home ---------- */
 function homeTypeHeader(title, count, tabKey) {
-  // Il contatore è un bottone: porta in primo piano la sezione (filtro a tab «come nel catalogo di artest»).
+  // Il contatore è un bottone: porta in primo piano la sezione (filtro a tab «come nel catalogo del viewer»).
   return '<div class="type-head"><h2>' + esc(title) + '</h2>' +
     '<button class="type-tag tag-btn" data-tab="' + tabKey + '" title="Mostra solo questa sezione">' + count + ' ' + (count === 1 ? 'scheda' : 'schede') + '</button></div>';
 }
@@ -449,6 +450,24 @@ function homeSectionBody() {
       html += '</div>';
     }
   }
+  if (state.homeTab === 'cards' || state.homeTab === 'all') {
+    html += homeTypeHeader('Le schede', state.cards.length, 'cards');
+    if (!state.cards.length) {
+      html += '<p class="step-note" style="margin-bottom:8px">Nessuna scheda generica: scegli materia e modello per creare schede di qualunque materia.</p>';
+    } else {
+      html += '<div class="grid-artworks">';
+      state.cards.forEach(function (c) {
+        var sub = String(c.modelloId || '').replace(/:v\d+$/, '').split(':').join(' · ');
+        html += '<div class="subj-card"><span class="s-ico">' + esc((c.titolo || '?').charAt(0)) + '</span>' +
+          '<span class="badge ' + (c.stato === 'ready' ? 'ready' : '') + '" style="position:static;align-self:flex-start">' + (c.stato === 'ready' ? 'pronta' : 'in lavorazione') + '</span>' +
+          '<h3>' + esc(c.titolo || 'Senza titolo') + '</h3>' +
+          '<p>' + esc(sub || 'Scheda generica') + '</p>' +
+          '<div class="actions"><button class="btn small" data-open-card="' + esc(c.id) + '">Modifica</button>' +
+          '<button class="btn small ghost" data-del-card="' + esc(c.id) + '">Elimina</button></div></div>';
+      });
+      html += '</div>';
+    }
+  }
   if (state.homeTab === 'comparison' || state.homeTab === 'all') {
     html += homeTypeHeader('Il confronto', state.comparisons.length, 'comparison');
     if (!state.comparisons.length) {
@@ -473,15 +492,17 @@ function renderHome() {
   var html = topbar('',
     '<button class="btn primary small" data-nav="new">+ Nuova opera</button>' +
     '<button class="btn small" data-nav="new-subject">+ Nuovo soggetto</button>' +
-    '<button class="btn small" data-nav="new-comparison">+ Nuovo confronto</button>');
+    '<button class="btn small" data-nav="new-comparison">+ Nuovo confronto</button>' +
+    '<button class="btn small" data-nav="new-card">+ Nuova scheda</button>');
   html += '<h1 class="page-title">Crea le schede didattiche</h1>';
-  html += '<p class="lead">Tre tipi di scheda: il singolo dipinto, un soggetto nella storia dell’arte, oppure un confronto “faccia a faccia” tra due opere. L’intelligenza artificiale propone i contenuti, tu controlli, correggi e salvi.</p>';
-  // Filtri a tab come nel catalogo di artest: «Tutte» + una voce per tipo, con contatore.
+  html += '<p class="lead">Tre tipi storici (dipinto, soggetto, confronto) più le <strong>schede generiche per materia</strong> (arte, filosofia…): scegli il modello, genera le sezioni con l’AI, rivedi e approva. L’intelligenza artificiale propone i contenuti, tu controlli, correggi e salvi.</p>';
+  // Filtri a tab come nel catalogo del viewer: «Tutte» + una voce per tipo, con contatore.
   var tabs = [
-    ['all', 'Tutte', state.list.length + state.subjects.length + state.comparisons.length],
+    ['all', 'Tutte', state.list.length + state.subjects.length + state.comparisons.length + state.cards.length],
     ['artwork', 'L’opera', state.list.length],
     ['subject', 'Il soggetto', state.subjects.length],
-    ['comparison', 'Il confronto', state.comparisons.length]
+    ['comparison', 'Il confronto', state.comparisons.length],
+    ['cards', 'Le schede', state.cards.length]
   ];
   html += '<div class="home-tabs" role="tablist">';
   tabs.forEach(function (t) {
@@ -2044,7 +2065,7 @@ function renderViewerDetail(d) {
   html += '<div class="sources" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">';
   (state.viewerSources || []).forEach(function (s) {});
   html += '</div>';
-  html += '<p class="muted-note">Contenuto generato con l’intelligenza artificiale e salvato nel database di artest-creator. Verifica i dati con le fonti prima dell’uso didattico.</p>';
+  html += '<p class="muted-note">Contenuto generato con l’intelligenza artificiale e salvato nel database di noesis-roads-creator. Verifica i dati con le fonti prima dell’uso didattico.</p>';
   return html;
 }
 function bindViewer(full) {
@@ -2066,7 +2087,7 @@ function bindGlobal() {
     if (tab) {
       e.preventDefault();
       var t = tab.getAttribute('data-tab');
-      if (t === 'all' || t === 'artwork' || t === 'subject' || t === 'comparison') {
+      if (t === 'all' || t === 'artwork' || t === 'subject' || t === 'comparison' || t === 'cards') {
         if (state.homeTab === t) return;
         state.homeTab = t;
         state.homeRedraw = true;
@@ -2083,6 +2104,7 @@ function bindGlobal() {
       else if (dest === 'new') { studio = new StudioView(); state.pipeline = null; state.view = 'studio'; render(); }
       else if (dest === 'new-subject') { subjectStudio = new SubjectStudioView(); state.pipeline = null; state.view = 'subject-studio'; render(); }
       else if (dest === 'new-comparison') { comparisonStudio = new ComparisonStudioView(); state.pipeline = null; state.view = 'comparison-studio'; render(); }
+      else if (dest === 'new-card') { cardStudio = new CardStudioView(); state.view = 'card-studio'; render(); refreshCardMaterie(); }
       return;
     }
     var open = e.target.closest('[data-open]');
@@ -2103,6 +2125,10 @@ function bindGlobal() {
     if (vc) { e.preventDefault(); state.view = 'comparison-viewer'; state.viewerComparisonId = vc.getAttribute('data-view-comparison'); render(); return; }
     var dc = e.target.closest('[data-del-comparison]');
     if (dc) { e.preventDefault(); removeComparison(dc.getAttribute('data-del-comparison')); return; }
+    var ocg = e.target.closest('[data-open-card]');
+    if (ocg) { e.preventDefault(); openCardStudio(ocg.getAttribute('data-open-card')); return; }
+    var dcg = e.target.closest('[data-del-card]');
+    if (dcg) { e.preventDefault(); removeCard(dcg.getAttribute('data-del-card')); return; }
     var pipe = e.target.closest('[data-pipe]');
     if (pipe) {
       e.preventDefault();
@@ -2112,12 +2138,353 @@ function bindGlobal() {
     }
   });
 }
+/* ---------- studio generico: schede-lezione guidate dallo schema (nucleo Fase 2) ---------- */
+function CardStudioView() {
+  this.id = null;
+  this.titolo = '';
+  this.materiaId = '';
+  this.modelloId = '';
+  this.modello = null; // schema completo da GET /api/models
+  this.corpi = {}; // chiave sezione -> corpo tipizzato
+  this.immagini = [];
+  this.stato = 'draft';
+  this.materie = [];
+  this.modelli = [];
+  this.genBusy = {};
+}
+var cardStudio = null;
+
+function cardEmptyBody(type) {
+  if (type === 'text') return { text: '' };
+  if (type === 'epochs') return { chapters: [] };
+  if (type === 'works') return { works: [] };
+  if (type === 'points') return { items: [] };
+  if (type === 'kv') return { entries: [] };
+  if (type === 'pair') return { a: { title: '', text: '' }, b: { title: '', text: '' } };
+  return { caption: '' }; // image
+}
+function cardApplyFull(s, full) {
+  s.id = full.id;
+  s.titolo = full.titolo || '';
+  s.stato = full.stato || 'draft';
+  s.modello = full.modello;
+  s.modelloId = full.modello.id;
+  s.materiaId = full.modello.materiaId;
+  s.corpi = {};
+  (full.modello.schema.sections || []).forEach(function (def) { s.corpi[def.key] = cardEmptyBody(def.type); });
+  (full.sezioni || []).forEach(function (sez) { s.corpi[sez.chiave] = sez.corpo || cardEmptyBody((full.modello.schema.sections.find(function (d) { return d.key === sez.chiave; }) || {}).type); });
+  s.immagini = full.immagini || [];
+}
+function refreshCardMaterie() {
+  var s = cardStudio;
+  if (!s) return;
+  api('/api/materie').then(function (r) {
+    s.materie = r.materie || [];
+    if (!s.materiaId && s.materie.length) s.materiaId = s.materie[0].id;
+    if (s.materiaId) return api('/api/models?subject=' + encodeURIComponent(s.materiaId)).then(function (m) {
+      s.modelli = m.models || [];
+      render();
+    });
+    render();
+  }).catch(function (e) { toast(e.message); });
+}
+function openCardStudio(id) {
+  cardStudio = new CardStudioView();
+  state.view = 'card-studio';
+  render();
+  api('/api/cards/' + encodeURIComponent(id)).then(function (full) {
+    cardApplyFull(cardStudio, full);
+    render();
+  }).catch(function (e) { toast(e.message); });
+}
+function removeCard(id) {
+  if (!confirm('Eliminare questa scheda e i suoi contenuti dal database?')) return;
+  api('/api/cards/' + encodeURIComponent(id), { method: 'DELETE' }).then(function () {
+    toast('Scheda eliminata', true);
+    refreshList();
+  }).catch(function (e) { toast(e.message); });
+}
+function renderCardStudio() {
+  var s = cardStudio;
+  if (!s) { s = cardStudio = new CardStudioView(); }
+  var isNew = !s.id;
+  var html = topbar('',
+    (s.stato === 'ready' && s.id ? '<button class="btn small" data-pdf onclick="downloadPdf(\'/api/cards/\' + cardStudio.id + \'/pdf\', \'scheda.pdf\')">⬇ PDF</button>' : '') +
+    '<button class="btn small" data-nav="home">← Elenco</button>');
+  html += '<h1 class="page-title">' + (isNew ? 'Nuova scheda' : esc(s.titolo || 'Scheda')) + '</h1>';
+  html += '<p class="lead">Scegli materia e modello: l’editor segue lo schema (un widget per tipo-sezione). Genera con l’AI, rivedi e approva.</p>';
+  if (!isNew) {
+    html += '<p class="step-note">Stato: <strong>' + (s.stato === 'ready' ? 'pronta' : 'in lavorazione') + '</strong>' +
+      (s.modello ? ' · modello ' + esc(s.modello.materiaId + ' · ' + (s.modello.schema.name || s.modello.chiave)) : '') + '</p>';
+  }
+  // Passo 1: materia + modello + titolo
+  html += '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">Passo 1 · Modello</span></div>' +
+    '<div class="meta-grid">' +
+    '<div class="field"><label>Materia</label><select id="csMateria"' + (isNew ? '' : ' disabled') + '>' +
+    s.materie.map(function (m) { return '<option value="' + esc(m.id) + '"' + (m.id === s.materiaId ? ' selected' : '') + '>' + esc(m.nome) + '</option>'; }).join('') +
+    '</select></div>' +
+    '<div class="field"><label>Modello di scheda</label><select id="csModello"' + (isNew ? '' : ' disabled') + '>' +
+    s.modelli.map(function (m) { var sid = m.id || (m.materiaId + ':' + m.chiave + ':v' + m.versione); return '<option value="' + esc(sid) + '"' + (sid === s.modelloId ? ' selected' : '') + '>' + esc(m.nome || m.chiave) + '</option>'; }).join('') +
+    '</select></div>' +
+    '<div class="field"><label>Titolo della scheda</label><input id="csTitolo" value="' + esc(s.titolo) + '" placeholder="es. Kant e il criticismo" /></div>' +
+    '</div>' +
+    (isNew ? '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" id="csCreate">Crea scheda</button></div>' : '') +
+    '</div>';
+  if (!isNew && s.modello) {
+    (s.modello.schema.sections || []).forEach(function (def) {
+      html += '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">' + esc(def.title) +
+        (def.required ? ' · obbligatoria' : '') + ' · ' + esc(def.type) + '</span>' +
+        '<span style="display:flex;gap:8px">' +
+        (def.type !== 'image' ? '<button class="btn small" data-cs-gen="' + esc(def.key) + '">✨ Genera</button>' : '') +
+        '<button class="btn small primary" data-cs-save="' + esc(def.key) + '">💾 Salva sezione</button></span></div>' +
+        '<div id="cs-ed-' + esc(def.key) + '">' + cardSectionEditor(s, def) + '</div></div>';
+    });
+    html += '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:20px">' +
+      '<button class="btn primary" id="csGenAll" style="padding:14px 22px">⚡ Genera tutte le sezioni</button>' +
+      '<button class="btn green" id="csApprove" style="padding:14px 22px">✅ Approva</button>' +
+      '<button class="btn ghost" id="csDelete">🗑 Elimina</button>' +
+      '<span class="step-note" id="csNote">Genera o compila le sezioni, salva ciascuna, poi approva.</span></div>';
+  }
+  appEl.innerHTML = html;
+  bindCardStudio(s);
+}
+function cardSectionEditor(s, def) {
+  var b = s.corpi[def.key] || cardEmptyBody(def.type);
+  var k = def.key;
+  if (def.type === 'text') {
+    return '<div class="field"><label>' + esc(def.title) + (def.maxWords ? ' (max ' + def.maxWords + ' parole)' : '') + '</label>' +
+      '<textarea data-cs-text="' + esc(k) + '" style="min-height:120px">' + esc(b.text || '') + '</textarea></div>';
+  }
+  if (def.type === 'epochs') {
+    var h = (b.chapters || []).length ? '' : '<p class="step-note">Nessun capitolo: genera oppure aggiungi a mano.</p>';
+    (b.chapters || []).forEach(function (c, i) {
+      h += '<div class="chapter-row"><input data-cs-f="' + esc(k) + ':chapters:' + i + ':era" value="' + esc(c.era) + '" placeholder="Epoca" />' +
+        '<textarea data-cs-f="' + esc(k) + ':chapters:' + i + ':text" placeholder="Testo del capitolo…">' + esc(c.text) + '</textarea>' +
+        '<button class="row-del" data-cs-del="' + esc(k + ':chapters:' + i) + '">✕</button></div>';
+    });
+    return h + '<button class="btn small" data-cs-add="' + esc(k) + ':chapters" style="margin-top:8px">➕ Capitolo</button>';
+  }
+  if (def.type === 'works') {
+    var w = (b.works || []).length ? '' : '<p class="step-note">Nessuna opera: genera oppure aggiungi a mano.</p>';
+    (b.works || []).forEach(function (o, i) {
+      w += '<div class="chapter-row"><input data-cs-f="' + esc(k) + ':works:' + i + ':title" value="' + esc(o.title) + '" placeholder="Titolo" />' +
+        '<input data-cs-f="' + esc(k) + ':works:' + i + ':artist" value="' + esc(o.artist) + '" placeholder="Autore" />' +
+        '<textarea data-cs-f="' + esc(k) + ':works:' + i + ':caption" placeholder="Perché conta (max 25 parole)…">' + esc(o.caption) + '</textarea>' +
+        '<button class="row-del" data-cs-del="' + esc(k + ':works:' + i) + '">✕</button></div>';
+    });
+    return w + '<button class="btn small" data-cs-add="' + esc(k) + ':works" style="margin-top:8px">➕ Opera</button>';
+  }
+  if (def.type === 'points') {
+    var p = (b.items || []).length ? '' : '<p class="step-note">Nessuna voce: genera oppure aggiungi a mano.</p>';
+    (b.items || []).forEach(function (it, i) {
+      p += '<div class="chapter-row"><input data-cs-f="' + esc(k) + ':items:' + i + ':title" value="' + esc(it.title) + '" placeholder="Titolo voce" />' +
+        '<textarea data-cs-f="' + esc(k) + ':items:' + i + ':text" placeholder="Testo della voce…">' + esc(it.text) + '</textarea>' +
+        '<button class="row-del" data-cs-del="' + esc(k + ':items:' + i) + '">✕</button></div>';
+    });
+    return p + '<button class="btn small" data-cs-add="' + esc(k) + ':items" style="margin-top:8px">➕ Voce</button>';
+  }
+  if (def.type === 'kv') {
+    var e = (b.entries || []).length ? '' : '<p class="step-note">Nessuna voce: genera oppure aggiungi a mano.</p>';
+    (b.entries || []).forEach(function (en, i) {
+      e += '<div class="symbol-row"><input data-cs-f="' + esc(k) + ':entries:' + i + ':label" value="' + esc(en.label || en.term) + '" placeholder="Etichetta" />' +
+        '<input data-cs-f="' + esc(k) + ':entries:' + i + ':value" value="' + esc(en.value || en.meaning) + '" placeholder="Valore" />' +
+        '<button class="row-del" data-cs-del="' + esc(k + ':entries:' + i) + '">✕</button></div>';
+    });
+    return e + '<button class="btn small" data-cs-add="' + esc(k) + ':entries" style="margin-top:8px">➕ Voce</button>';
+  }
+  if (def.type === 'pair') {
+    var side = function (letter, label) {
+      var sd = (b[letter] || {});
+      return '<div class="field"><label>Lato ' + label + ' · titolo</label><input data-cs-f="' + esc(k) + ':' + letter + ':title" value="' + esc(sd.title) + '" />' +
+        '<label style="margin-top:8px">Lato ' + label + ' · testo</label><textarea data-cs-f="' + esc(k) + ':' + letter + ':text">' + esc(sd.text) + '</textarea></div>';
+    };
+    return '<div class="meta-grid">' + side('a', 'A') + side('b', 'B') + '</div>';
+  }
+  // image: didascalia + upload per ruolo + miniature esistenti
+  var im = '<div class="field"><label>Didascalia</label><input data-cs-text-cap="' + esc(k) + '" value="' + esc(b.caption || '') + '" placeholder="Didascalia della tavola" /></div>';
+  im += '<div class="field"><label>Carica immagine (ruolo: ' + esc(k) + ')</label><input type="file" id="cs-file-' + esc(k) + '" accept="image/*" /></div>';
+  var mine = (s.immagini || []).filter(function (m) { return String(m.ruolo) === String(k); });
+  if (mine.length) {
+    im += '<div class="sim-grid">';
+    mine.forEach(function (m) {
+      im += '<div class="sim-card"><img class="sim-thumb" src="' + esc(m.url) + '" alt="" loading="lazy" />' +
+        '<div class="sim-fields"><span class="sim-status">' + esc(m.ruolo) + ' · ' + esc(m.mime) + '</span>' +
+        '<div class="sim-actions"><button class="btn small ghost" data-cs-imgdel="' + m.id + '">✕ Rimuovi</button></div></div></div>';
+    });
+    im += '</div>';
+  } else {
+    im += '<p class="step-note">Nessuna immagine con questo ruolo: caricala qui sopra.</p>';
+  }
+  return im;
+}
+function cardSetPath(s, path, value) {
+  // path "chiave:lista:indice:campo" oppure "chiave:lato:campo"
+  var parts = path.split(':');
+  var key = parts[0];
+  if (parts.length === 1) return;
+  if (parts.length === 3 && (parts[1] === 'a' || parts[1] === 'b')) {
+    s.corpi[key][parts[1]][parts[2]] = value;
+    return;
+  }
+  var arr = s.corpi[key][parts[1]];
+  var idx = Number(parts[2]);
+  if (arr && arr[idx]) arr[idx][parts[3]] = value;
+}
+function bindCardStudio(s) {
+  var mat = document.getElementById('csMateria');
+  if (mat) mat.onchange = function () {
+    s.materiaId = mat.value; s.modelloId = ''; s.modelli = [];
+    if (!s.id) { api('/api/models?subject=' + encodeURIComponent(s.materiaId)).then(function (m) { s.modelli = m.models || []; render(); }).catch(function (e) { toast(e.message); }); }
+  };
+  var mod = document.getElementById('csModello');
+  if (mod) mod.onchange = function () { s.modelloId = mod.value; };
+  var tit = document.getElementById('csTitolo');
+  if (tit) {
+    var titTimer = null;
+    tit.oninput = function () {
+      s.titolo = tit.value;
+      if (titTimer) clearTimeout(titTimer);
+      if (s.id) titTimer = setTimeout(function () {
+        patch('/api/cards/' + encodeURIComponent(s.id), { titolo: s.titolo }).catch(function (e) { toast(e.message); });
+      }, 600);
+    };
+  }
+  var create = document.getElementById('csCreate');
+  if (create) create.onclick = function () {
+    if (!s.modelloId) { toast('Scegli un modello di scheda'); return; }
+    post('/api/cards', { modelloId: s.modelloId, titolo: s.titolo }).then(function (r) {
+      return api('/api/cards/' + encodeURIComponent(r.card.id));
+    }).then(function (full) {
+      cardApplyFull(s, full);
+      toast('Scheda creata', true);
+      render();
+    }).catch(function (e) { toast(e.message); });
+  };
+  if (!s.id) return;
+  // campi testo semplici
+  appEl.querySelectorAll('[data-cs-text]').forEach(function (ta) {
+    ta.oninput = function () { s.corpi[ta.getAttribute('data-cs-text')].text = ta.value; };
+  });
+  appEl.querySelectorAll('[data-cs-text-cap]').forEach(function (inp) {
+    inp.oninput = function () { s.corpi[inp.getAttribute('data-cs-text-cap')].caption = inp.value; };
+  });
+  appEl.querySelectorAll('[data-cs-f]').forEach(function (inp) {
+    inp.oninput = function () { cardSetPath(s, inp.getAttribute('data-cs-f'), inp.value); };
+  });
+  // righe add/del (ridisegno della sola sezione)
+  appEl.querySelectorAll('[data-cs-add]').forEach(function (btn) {
+    btn.onclick = function () {
+      var parts = btn.getAttribute('data-cs-add').split(':');
+      var blanks = { chapters: { era: '', text: '' }, works: { title: '', artist: '', date: '', museum: '', caption: '' }, items: { title: '', text: '' }, entries: { label: '', value: '' } };
+      s.corpi[parts[0]][parts[1]].push(blanks[parts[1]] || {});
+      refreshCardSection(s, parts[0]);
+    };
+  });
+  appEl.querySelectorAll('[data-cs-del]').forEach(function (btn) {
+    btn.onclick = function () {
+      var parts = btn.getAttribute('data-cs-del').split(':');
+      s.corpi[parts[0]][parts[1]].splice(Number(parts[2]), 1);
+      refreshCardSection(s, parts[0]);
+    };
+  });
+  // genera / salva per sezione
+  appEl.querySelectorAll('[data-cs-gen]').forEach(function (btn) {
+    btn.onclick = function () { cardGenSection(s, btn.getAttribute('data-cs-gen'), btn); };
+  });
+  appEl.querySelectorAll('[data-cs-save]').forEach(function (btn) {
+    btn.onclick = function () { cardSaveSection(s, btn.getAttribute('data-cs-save'), btn); };
+  });
+  // upload immagini per ruolo
+  (s.modello.schema.sections || []).filter(function (d) { return d.type === 'image'; }).forEach(function (def) {
+    var file = document.getElementById('cs-file-' + def.key);
+    if (file) file.onchange = function () {
+      var f = file.files && file.files[0];
+      if (!f) return;
+      fileToDataUrl(f).then(function (dataUrl) {
+        return post('/api/cards/' + encodeURIComponent(s.id) + '/images', { ruolo: def.key, imageDataUrl: dataUrl });
+      }).then(function () {
+        return api('/api/cards/' + encodeURIComponent(s.id));
+      }).then(function (full) {
+        s.immagini = full.immagini || [];
+        toast('Immagine caricata', true);
+        refreshCardSection(s, def.key);
+      }).catch(function (e) { toast(e.message); });
+    };
+  });
+  appEl.querySelectorAll('[data-cs-imgdel]').forEach(function (btn) {
+    btn.onclick = function () {
+      if (!confirm('Rimuovere questa immagine?')) return;
+      api('/api/cards/' + encodeURIComponent(s.id) + '/images/' + btn.getAttribute('data-cs-imgdel'), { method: 'DELETE' }).then(function () {
+        return api('/api/cards/' + encodeURIComponent(s.id));
+      }).then(function (full) {
+        s.immagini = full.immagini || [];
+        render();
+      }).catch(function (e) { toast(e.message); });
+    };
+  });
+  var all = document.getElementById('csGenAll');
+  if (all) all.onclick = function () { cardGenAll(s, all); };
+  var approve = document.getElementById('csApprove');
+  if (approve) approve.onclick = function () {
+    approve.disabled = true;
+    post('/api/cards/' + encodeURIComponent(s.id) + '/approve', {}).then(function (r) {
+      s.stato = 'ready';
+      toast('Scheda approvata: pronta nel viewer', true);
+      render();
+    }).catch(function (e) { toast(e.message); approve.disabled = false; });
+  };
+  var delBtn = document.getElementById('csDelete');
+  if (delBtn) delBtn.onclick = function () { removeCard(s.id); };
+}
+function refreshCardSection(s, key) {
+  var def = (s.modello.schema.sections || []).find(function (d) { return d.key === key; });
+  var el = document.getElementById('cs-ed-' + key);
+  if (def && el) { el.innerHTML = cardSectionEditor(s, def); bindCardStudio(s); }
+}
+function cardSaveSection(s, key, btn) {
+  var old = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+  patch('/api/cards/' + encodeURIComponent(s.id) + '/sections/' + encodeURIComponent(key), { corpo: s.corpi[key] }).then(function (r) {
+    s.corpi[key] = (r.section && r.section.corpo) || s.corpi[key];
+    toast('Sezione salvata', true);
+    if (btn) { btn.disabled = false; btn.innerHTML = old; }
+  }).catch(function (e) { toast(e.message); if (btn) { btn.disabled = false; btn.innerHTML = old; } });
+}
+function cardGenSection(s, key, btn) {
+  var old = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+  post('/api/cards/' + encodeURIComponent(s.id) + '/generate/' + encodeURIComponent(key), {}).then(function (r) {
+    if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
+    if (r.warnings && r.warnings.length) toast('Generata con avvisi: ' + r.warnings.join('; '));
+    else toast('Sezione generata', true);
+    refreshCardSection(s, key);
+    if (btn) { btn.disabled = false; btn.innerHTML = old; }
+  }).catch(function (e) { toast(e.message); if (btn) { btn.disabled = false; btn.innerHTML = old; } });
+}
+function cardGenAll(s, btn) {
+  var defs = (s.modello.schema.sections || []).filter(function (d) { return d.type !== 'image'; });
+  var i = 0;
+  btn.disabled = true;
+  var step = function () {
+    if (i >= defs.length) { btn.disabled = false; btn.innerHTML = '⚡ Genera tutte le sezioni'; toast('Generazione completa: rivedi e salva', true); render(); return; }
+    btn.innerHTML = '⚡ Generazione ' + (i + 1) + '/' + defs.length + '…';
+    var key = defs[i].key;
+    post('/api/cards/' + encodeURIComponent(s.id) + '/generate/' + encodeURIComponent(key), {}).then(function (r) {
+      if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
+      i += 1;
+      step();
+    }).catch(function (e) { toast('Sezione ' + key + ': ' + e.message); i += 1; step(); });
+  };
+  step();
+}
+
 /* ---------- home actions ---------- */
 function refreshList() {
-  Promise.all([api('/api/artworks'), api('/api/subjects'), api('/api/comparisons')]).then(function (results) {
+  Promise.all([api('/api/artworks'), api('/api/subjects'), api('/api/comparisons'), api('/api/cards').catch(function () { return { cards: [] }; })]).then(function (results) {
     state.list = results[0].artworks || [];
     state.subjects = results[1].subjects || [];
     state.comparisons = results[2].comparisons || [];
+    state.cards = results[3].cards || [];
     state.view = 'home';
     render();
   }).catch(function (e) { toast(e.message); });

@@ -1,4 +1,4 @@
-// Viewer con pannello immagine "a fasce" come in artest-creator:
+// Viewer con pannello immagine "a fasce" come nel creator:
 // - fasce 1-4 (sinistra): l'immagine del dipinto, renderizzata su canvas
 // - fascia 5 (destra): la colonna verticale delle didascalie dei dettagli
 // Quando una didascalia è attiva, SOLO il riquadro di quel dettaglio resta a colori

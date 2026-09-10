@@ -1,13 +1,13 @@
-// Artest — launcher: hub + supervisore dei due server (zero dipendenze).
+// Noesis Roads — launcher: hub + supervisore dei due server (zero dipendenze).
 //
 // Uso: node launcher.mjs
-//   Avvia subito viewer (artest) e creator (artest-creator) come processi figli
-//   e serve l'hub su ARTEST_HUB_PORT (default 18080): due grossi bottoni
-//   ("Vedi le schede di Artest" / "Crea le schede di Artest") + ⚙️ Opzioni
+//   Avvia subito viewer (noesis-roads) e creator (noesis-roads-creator) come processi figli
+//   e serve l'hub su NOESIS_HUB_PORT (default 18080): due grossi bottoni
+//   ("Vedi le schede" / "Crea le schede") + ⚙️ Opzioni
 //   (chiave API, modelli, porte) che riscrive .env.local e riavvia i figli.
 //
 // Porte di default (banda 18xxx, fuori dalla affollata 80xx):
-//   hub 18080 · viewer APP_PORT=18000 · creator ARTEST_CREATOR_PORT=18100
+//   hub 18080 · viewer APP_PORT=18000 · creator NOESIS_CREATOR_PORT=18100
 import { fork } from 'node:child_process';
 import { createServer } from 'node:http';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -26,9 +26,9 @@ export const CONFIG_FIELDS = Object.freeze({
   webSearch: 'OPENROUTER_WEB_SEARCH',
   host: 'APP_HOST',
   viewerPort: 'APP_PORT',
-  creatorPort: 'ARTEST_CREATOR_PORT',
-  hubPort: 'ARTEST_HUB_PORT',
-  creatorDb: 'ARTEST_CREATOR_DB',
+  creatorPort: 'NOESIS_CREATOR_PORT',
+  hubPort: 'NOESIS_HUB_PORT',
+  creatorDb: 'NOESIS_CREATOR_DB',
   rpm: 'OPENROUTER_RPM'
 });
 
@@ -55,9 +55,9 @@ export function effectiveConfig(env = process.env) {
     webSearch: String(env.OPENROUTER_WEB_SEARCH || 'false').trim().toLowerCase() === 'true',
     host: env.APP_HOST || '127.0.0.1',
     viewerPort: Number(env.APP_PORT || DEFAULTS.viewerPort),
-    creatorPort: Number(env.ARTEST_CREATOR_PORT || DEFAULTS.creatorPort),
-    hubPort: Number(env.ARTEST_HUB_PORT || DEFAULTS.hubPort),
-    creatorDb: env.ARTEST_CREATOR_DB || '',
+    creatorPort: Number(env.NOESIS_CREATOR_PORT || env.ARTEST_CREATOR_PORT || DEFAULTS.creatorPort),
+    hubPort: Number(env.NOESIS_HUB_PORT || env.ARTEST_HUB_PORT || DEFAULTS.hubPort),
+    creatorDb: env.NOESIS_CREATOR_DB || env.ARTEST_CREATOR_DB || '',
     rpm: Number(env.OPENROUTER_RPM || 26),
     lanExposed: (env.APP_HOST || '127.0.0.1') === '0.0.0.0'
   };
@@ -123,7 +123,7 @@ async function probeStatus(port, timeoutMs = 2000) {
   } catch { return false; }
 }
 
-// ---------- pagina hub (stesso design system di artest/artest-creator) ----------
+// ---------- pagina hub (stesso design system di viewer/creator) ----------
 export function hubPage(cfg) {
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   return `<!DOCTYPE html>
@@ -131,7 +131,7 @@ export function hubPage(cfg) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Artest · Hub</title>
+<title>Noesis Roads · Hub</title>
 <style>
 :root{--ink:#17344a;--muted:#6b7a83;--paper:#f6f3ee;--white:#fffdf9;--line:#dedbd3;--coral:#dc7056;--mustard:#e2ac44;--green:#628f80;font-family:'DM Sans',Arial,sans-serif;color:var(--ink);background:var(--paper)}
 *{box-sizing:border-box}body{margin:0;background:var(--paper)}
@@ -184,7 +184,7 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
 <body>
 <div class="wrap">
   <div class="topbar">
-    <div class="brand"><span class="brand-mark"><i></i><i></i><i></i></span>Artest</div>
+    <div class="brand"><span class="brand-mark"><i></i><i></i><i></i></span>Noesis Roads</div>
     <button class="btn small" id="gearBtn" title="Opzioni">⚙️ Opzioni</button>
   </div>
   <div class="eyebrow">Leggi l'opera d'arte · da dove cominci</div>
@@ -192,16 +192,17 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
   <p class="lead">Due programmi indipendenti: <b>Vedi</b> mostra le schede didattiche già pronte, <b>Crea</b> le genera con l'aiuto dell'AI. L'hub li tiene accesi entrambi.</p>
   <div id="lanBanner"></div>
   <div class="cards">
-    <a class="bigcard viewer" id="viewerCard" href="#">
+    <div class="bigcard viewer">
       <span class="eyebrow">Lettura · porta ${esc(cfg.viewerPort)}</span>
-      <h2>Vedi le schede di Artest</h2>
+      <h2>Vedi le schede</h2>
       <p>Esplora opere, soggetti e confronti faccia a faccia già pubblicati.</p>
-      <span class="go">Apri il viewer →</span>
+      <span class="go" id="viewerGo" style="cursor:pointer">Apri il viewer →</span>
+      <div class="statusline" id="materieLine" style="margin-top:10px">Materie: <span id="materieLinks">caricamento…</span></div>
       <div class="statusline"><span class="dot" id="viewerDot"></span><span id="viewerStatus">verifica…</span></div>
-    </a>
+    </div>
     <a class="bigcard creator" id="creatorCard" href="#">
       <span class="eyebrow">Authoring · porta ${esc(cfg.creatorPort)}</span>
-      <h2>Crea le schede di Artest</h2>
+      <h2>Crea le schede</h2>
       <p>Carica un'immagine e genera la scheda didattica completa.</p>
       <span class="go">Apri il creator →</span>
       <div class="statusline"><span class="dot" id="creatorDot"></span><span id="creatorStatus">verifica…</span></div>
@@ -224,7 +225,7 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
     <div class="field"><label for="f_hubPort">Porta hub</label><input id="f_hubPort" inputmode="numeric"><small>Cambiarla richiede il riavvio manuale del launcher.</small></div>
     <details class="adv"><summary>Avanzate</summary>
       <div class="field"><label for="f_host">Host di ascolto</label><input id="f_host"><small>0.0.0.0 espone in rete locale: la gestione chiave diventa raggiungibile in LAN.</small></div>
-      <div class="field"><label for="f_creatorDb">Percorso DB creator</label><input id="f_creatorDb" placeholder="default: artest-creator/data/artest-creator.db"></div>
+      <div class="field"><label for="f_creatorDb">Percorso DB creator</label><input id="f_creatorDb" placeholder="default: noesis-roads-creator/data/noesis-roads-creator.db"></div>
       <div class="field"><label for="f_rpm">Richieste/min (rate limiter)</label><input id="f_rpm" inputmode="numeric"></div>
     </details>
     <div class="row"><button class="btn ghost" id="cancelBtn">Annulla</button><button class="btn primary" id="saveBtn">Salva e riavvia i server</button></div>
@@ -235,7 +236,21 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
 (function () {
   var viewerPort = ${JSON.stringify(cfg.viewerPort)}, creatorPort = ${JSON.stringify(cfg.creatorPort)};
   function host() { return location.hostname || '127.0.0.1'; }
-  document.getElementById('viewerCard').href = 'http://' + host() + ':' + viewerPort + '/';
+  var viewerUrl = 'http://' + host() + ':' + viewerPort + '/';
+  document.getElementById('viewerGo').onclick = function () { location.href = viewerUrl; };
+  fetch('http://' + host() + ':' + creatorPort + '/api/materie').then(function (r) { return r.ok ? r.json() : null; }).then(function (b) {
+    var el = document.getElementById('materieLinks');
+    var list = b && Array.isArray(b.materie) ? b.materie : [];
+    if (!list.length) { el.textContent = 'non disponibili (creator spento?)'; return; }
+    el.textContent = '';
+    list.forEach(function (m, i) {
+      if (i) el.appendChild(document.createTextNode(' · '));
+      var a = document.createElement('a');
+      a.href = viewerUrl + '?materia=' + encodeURIComponent(m.id);
+      a.textContent = m.nome || m.id;
+      el.appendChild(a);
+    });
+  }).catch(function () { document.getElementById('materieLinks').textContent = 'non disponibili (creator spento?)'; });
   document.getElementById('creatorCard').href = 'http://' + host() + ':' + creatorPort + '/';
   function toast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(function () { t.style.display = 'none'; }, 3500); }
   function setDot(dot, label, up, port) {
@@ -304,17 +319,17 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
 // ---------- supervisore ----------
 export function createHubServer(opts = {}) {
   const env = opts.env || process.env;
-  const envFile = opts.envFile || env.ARTEST_HUB_ENV_FILE || join(ROOT, '.env.local');
+  const envFile = opts.envFile || env.NOESIS_HUB_ENV_FILE || env.ARTEST_HUB_ENV_FILE || join(ROOT, '.env.local');
   const host = opts.host ?? env.APP_HOST ?? '127.0.0.1';
-  const hubPort = Number(opts.hubPort ?? env.ARTEST_HUB_PORT ?? DEFAULTS.hubPort);
+  const hubPort = Number(opts.hubPort ?? env.NOESIS_HUB_PORT ?? env.ARTEST_HUB_PORT ?? DEFAULTS.hubPort);
   const viewerPort = Number(opts.viewerPort ?? env.APP_PORT ?? DEFAULTS.viewerPort);
-  const creatorPort = Number(opts.creatorPort ?? env.ARTEST_CREATOR_PORT ?? DEFAULTS.creatorPort);
+  const creatorPort = Number(opts.creatorPort ?? env.NOESIS_CREATOR_PORT ?? env.ARTEST_CREATOR_PORT ?? DEFAULTS.creatorPort);
   const doSpawn = opts.spawn !== false;
 
   const scripts = opts.scripts || {};
   const children = {
     viewer: { name: 'viewer', script: scripts.viewer || join(ROOT, 'server.mjs'), extraEnv: { APP_PORT: String(viewerPort) }, proc: null, up: false, expectExit: false, restartTimer: null },
-    creator: { name: 'creator', script: scripts.creator || join(ROOT, 'artest-creator', 'server.mjs'), extraEnv: { ARTEST_CREATOR_PORT: String(creatorPort) }, proc: null, up: false, expectExit: false, restartTimer: null }
+    creator: { name: 'creator', script: scripts.creator || join(ROOT, 'noesis-roads-creator', 'server.mjs'), extraEnv: { NOESIS_CREATOR_PORT: String(creatorPort) }, proc: null, up: false, expectExit: false, restartTimer: null }
   };
   let stopping = false;
 
@@ -357,7 +372,7 @@ export function createHubServer(opts = {}) {
     await new Promise((r) => setTimeout(r, 400));
     // rilegge le porte dall'env aggiornato (il pannello può averle cambiate)
     children.viewer.extraEnv.APP_PORT = String(Number(env.APP_PORT || DEFAULTS.viewerPort));
-    children.creator.extraEnv.ARTEST_CREATOR_PORT = String(Number(env.ARTEST_CREATOR_PORT || DEFAULTS.creatorPort));
+    children.creator.extraEnv.NOESIS_CREATOR_PORT = String(Number(env.NOESIS_CREATOR_PORT || env.ARTEST_CREATOR_PORT || DEFAULTS.creatorPort));
     startChild('viewer');
     startChild('creator');
   }
@@ -443,7 +458,7 @@ async function main() {
   const hub = createHubServer();
   const host = process.env.APP_HOST || '127.0.0.1';
   hub.server.listen(hub.ports.hub, host, () => {
-    console.log(`Artest hub: http://${host}:${hub.ports.hub}`);
+    console.log(`Noesis Roads hub: http://${host}:${hub.ports.hub}`);
     console.log(`  viewer  (Vedi le schede): http://${host}:${hub.ports.viewer}`);
     console.log(`  creator (Crea le schede): http://${host}:${hub.ports.creator}`);
   });

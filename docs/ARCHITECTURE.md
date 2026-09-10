@@ -60,6 +60,10 @@ GET/PATCH /api/cards/:id                dettaglio / revisione sezioni
 POST      /api/cards/:id/generate/:sez  genera una sezione via LLM
 POST      /api/cards/:id/approve        ready (+ eventuali rese immagini)
 GET       /api/cards/:id/pdf            PDF libro d'arte della scheda
-GET       /api/subjects                 materie disponibili
+GET       /api/materie                  materie disponibili
 GET       /api/models?subject=...       modelli di una materia
 ```
+
+Namespace deciso in Fase 2: `/api/materie` (non `/api/subjects`, occupato
+dalle schede soggetto arte legacy, intatte). Stesse rotte su creator
+(scrittura) e viewer (sola lettura delle `ready`).

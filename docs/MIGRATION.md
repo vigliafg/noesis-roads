@@ -9,7 +9,7 @@ sicurezza; il rollback è la loro semplice rilettura.
 - Checkout `artest` al tag `artest-stable`, suite 40/40 verde.
 - Stesse dipendenze di artest (Node ≥ 22.5, Python + Pillow + reportlab).
 
-## Script `migrate-art.js` (da scrivere in `creator/`)
+## Script `migrate-art.mjs` (in `noesis-roads-creator/`)
 
 1. Legge dal DB legacy solo schede arte in stato `ready`.
 2. Mappa sui modelli generici `art:opera`, `art:soggetto`, `art:confronto`

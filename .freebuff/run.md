@@ -3,26 +3,41 @@
 ## Reproduce artifacts
 
 - No environment files or package dependencies are required.
-- Ensure Node.js 18+ is available.
-- For AI analysis, copy `.env.example` to `.env.local` and fill in `OPENROUTER_API_KEY`. The server loads `.env.local` / `.env` automatically. Never commit the key.
+- Ensure Node.js 22.5+ is available (`node:sqlite`).
+- For AI generation, copy `.env.example` to `.env.local` and fill in `OPENROUTER_API_KEY`. The servers load `.env.local` / `.env` automatically. Never commit the key.
 
-## Run the server
+## Run the servers
 
-From the project root, run the server on the default port:
+Easiest: the launcher (hub + both apps, ports 18xxx):
 
 ```bash
-node server.mjs
+node launcher.mjs
 ```
 
-The preview URL is `http://127.0.0.1:8000`.
+- Hub → `http://127.0.0.1:18080` (supervisor + ⚙️ options)
+- Viewer (noesis-roads) → `http://127.0.0.1:18000` (`APP_PORT`)
+- Creator (noesis-roads-creator) → `http://127.0.0.1:18100` (`NOESIS_CREATOR_PORT`)
 
-## artest-creator (app sorella · authoring contenuti)
+Manual (one terminal per server):
+
+```bash
+node server.mjs                  # viewer
+node noesis-roads-creator/server.mjs   # authoring
+```
+
+## noesis-roads-creator (app sorella · authoring contenuti)
 
 Server separato, zero dipendenze, richiede Node ≥ 22.5 (modulo nativo `node:sqlite`).
 
 ```bash
-cd artest-creator
-node server.mjs            # http://127.0.0.1:8100  (porta: ARTEST_CREATOR_PORT)
+cd noesis-roads-creator
+node server.mjs            # http://127.0.0.1:18100  (porta: NOESIS_CREATOR_PORT)
 ```
 
-La chiave `OPENROUTER_API_KEY` arriva da `.env.local`/`.env` alla radice del repo (loader condiviso con artest). Il DB SQLite si crea da solo in `artest-creator/data/artest-creator.db`; le immagini caricate finiscono in `artest-creator/uploads/`.
+La chiave `OPENROUTER_API_KEY` arriva da `.env.local`/`.env` alla radice del repo (loader condiviso col viewer). Il DB SQLite si crea da solo in `noesis-roads-creator/data/noesis-roads-creator.db` (riusa il precedente `artest-creator.db` se presente); le immagini caricate finiscono in `noesis-roads-creator/uploads/`.
+
+## Tests
+
+```bash
+node --test test_server.mjs test_core.mjs test_migrate.mjs   # 53 test
+```

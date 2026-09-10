@@ -1,18 +1,25 @@
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, writeFile, unlink, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  buildArtworkPdfPayload, buildSubjectPdfPayload, buildComparisonPdfPayload, buildGenericPdfPayload,
+} from './noesis-roads-creator/pdf-payloads.mjs';
 
 export const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
-// Lettura (sola lettura, zero scritture) delle schede "ready" prodotte da artest-creator.
+// Lettura (sola lettura, zero scritture) delle schede "ready" prodotte da noesis-roads-creator.
 import {
   listReadyArtworksRO, getArtworkImageDataRO, getOverviewRO, listDetailsRO,
   getDetailContentRO, listSourcesRO, listSimilarWorksRO, getSimilarImageRO,
   listReadySubjectsRO, getSubjectRO, getSubjectWorkImageRO,
-  listReadyComparisonsRO, getComparisonRO, getComparisonSideImageRO, getComparisonThumbRO
-} from './artest-creator/db.mjs';
+  listReadyComparisonsRO, getComparisonRO, getComparisonSideImageRO, getComparisonThumbRO,
+  listMaterieRO, listModelliRO, listReadySchedeRO, getSchedaFullRO, getImmagineRO
+} from './noesis-roads-creator/db.mjs';
 
 function loadLocalEnv() {
   for (const filename of ['.env.local', '.env']) {
@@ -195,7 +202,7 @@ Rispondi SOLO con JSON valido, senza markdown, nella forma:
 const COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
 const MET_SEARCH_API = 'https://collectionapi.metmuseum.org/public/collection/v1/search';
 const MET_OBJECT_API = 'https://collectionapi.metmuseum.org/public/collection/v1/objects/';
-const IMAGE_UA = 'artest-didattico/1.0 (didactic art app; contact: local)';
+const IMAGE_UA = 'noesis-roads-didattico/1.0 (didactic app; contact: local)';
 
 export async function resolveSimilarImage(work, fetchImpl = globalThis.fetch) {
   const query = String(work.search || `${work.title} ${work.artist}`).trim().slice(0, 120);
@@ -342,7 +349,7 @@ Non inventare nulla: fonda il testo su ciò che è osservabile e su fatti di cui
 
 // Rate limit globale: i modelli contributor di OpenRouter hanno 30 richieste/min.
 // Tutte le chiamate passano da qui -> semaforo a finestra scorrevole (default 26/min, sotto la soglia).
-// Consente di parallelizzare in sicurezza la generazione (artest-creator) senza incappare nel 429.
+// Consente di parallelizzare in sicurezza la generazione (noesis-roads-creator) senza incappare nel 429.
 const OPENROUTER_RPM = Math.max(1, Number(process.env.OPENROUTER_RPM || 26));
 const callTimestamps = [];
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -402,7 +409,7 @@ function json(res, status, payload) { const data = Buffer.from(JSON.stringify(pa
 function error(code, message, retryable = false) { return { error: { code, message, retryable } }; }
 
 // ---------------------------------------------------------------------------
-// Libreria e schede pubblicate: lettura (read-only) del DB di artest-creator.
+// Libreria e schede pubblicate: lettura (read-only) del DB di noesis-roads-creator.
 // ---------------------------------------------------------------------------
 function catalogSubject(s) {
   return {
@@ -484,6 +491,112 @@ function dbComparisonPayload(id) {
     points: (full.points || []).map(p => ({ kind: p.kind, title: p.title, text: p.text }))
   };
 }
+function catalogScheda(s) {
+  const schema = (s.modello && s.modello.schema) || {};
+  return {
+    cardType: 'scheda',
+    id: s.id,
+    title: s.titolo || 'Scheda senza titolo',
+    materiaId: schema.subject || '',
+    modelloKey: schema.key || '',
+    subtitle: [schema.subject, schema.name].filter(Boolean).join(' · '),
+    image: null,
+    fallbackImage: null,
+    period: (schema.cover && schema.cover.eyebrow) || 'Scheda didattica',
+    featured: false
+  };
+}
+function dbSchedaPayload(id) {
+  const full = getSchedaFullRO(id);
+  if (!full || full.stato !== 'ready') return null;
+  return {
+    cardType: 'scheda',
+    id: full.id,
+    titolo: full.titolo,
+    stato: full.stato,
+    modello: full.modello,
+    sezioni: full.sezioni,
+    immagini: (full.immagini || []).map((m) => ({ ...m, url: '/api/cards/' + full.id + '/images/' + m.id }))
+  };
+}
+const execFileAsync = promisify(execFile);
+const PDF_CWD = join(ROOT, 'noesis-roads-creator');
+
+function slugify(text) {
+  const base = String(text || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return base || 'scheda-' + Date.now();
+}
+
+// Forme "full" come dal creator (getFullArtwork/getFullSubject/getFullComparison),
+// ricostruite in sola lettura: i builder PDF condivisi restano invariati.
+function artworkFullRO(id) {
+  const ready = listReadyArtworksRO().find((x) => x.id === id);
+  if (!ready) return null;
+  return {
+    ...ready,
+    overview: getOverviewRO(id),
+    details: listDetailsRO(id).map((d) => ({
+      ...d,
+      tabs: { studio: getDetailContentRO(d.id, 'studio'), approfondimento: getDetailContentRO(d.id, 'approfondimento') },
+    })),
+    sources: listSourcesRO(id),
+    similarWorks: listSimilarWorksRO(id),
+  };
+}
+function pdfIoRO() {
+  return {
+    imageData: getArtworkImageDataRO,
+    similarImage: getSimilarImageRO,
+    subjectWorkImage: getSubjectWorkImageRO,
+    artworkImageData: getArtworkImageDataRO,
+    comparisonSideImage: getComparisonSideImageRO,
+    comparisonThumb: getComparisonThumbRO,
+    getImmagine: getImmagineRO,
+  };
+}
+async function renderPdf(payload) {
+  const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const inPath = join(tmpdir(), `noesis-pdf-${stamp}.json`);
+  const outPath = join(tmpdir(), `noesis-pdf-${stamp}.pdf`);
+  await writeFile(inPath, JSON.stringify(payload));
+  try {
+    try {
+      await execFileAsync('python3', ['make_pdf.py', inPath, outPath], { cwd: PDF_CWD, timeout: 120000 });
+    } catch (e) {
+      const stderr = String((e && e.stderr) || '');
+      if (e.code === 3 || stderr.includes('reportlab non installato')) {
+        throw new Error('reportlab non è installato: esegui "pip install reportlab" e riprova.');
+      }
+      throw new Error('Generazione PDF fallita: ' + (stderr.split('\n').filter(Boolean).pop() || e.message));
+    }
+    return await readFile(outPath);
+  } finally {
+    unlink(inPath).catch(() => {});
+    unlink(outPath).catch(() => {});
+  }
+}
+function sendPdf(res, payload, filename) {
+  return renderPdf(payload).then((buf) => {
+    res.writeHead(200, {
+      'Content-Type': 'application/pdf',
+      'Content-Length': buf.length,
+      'Content-Disposition': 'attachment; filename="' + filename + '"',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end(buf);
+  }).catch((e) => {
+    const message = String((e && e.message) || e);
+    json(res, message.includes('reportlab') ? 503 : 500, error('PDF_ERROR', message));
+  });
+}
+const PDF_GATE = 'Genera e salva prima i contenuti: il PDF esporta la scheda completa.';
+
 function catalogArtwork(a) {
   return {
     id: a.id,
@@ -547,7 +660,7 @@ function dbArtworkPayload(id) {
     annotatedImageUrl: images.annotated ? '/api/artworks/' + id + '/image-annotated' : null,
     description: (overviewRow && overviewRow.painting ? overviewRow.painting.slice(0, 300) : '') || (ready.title ? 'Esplora «' + ready.title + '» dettaglio per dettaglio.' : ''),
     alt: ready.title ? (ready.artist ? ready.artist + ', ' : '') + ready.title : 'Opera d’arte',
-    rights: 'Scheda didattica generata con intelligenza artificiale (artest-creator). Immagine per uso didattico; verifica i diritti prima di un uso pubblico.',
+    rights: 'Scheda didattica generata con intelligenza artificiale (noesis-roads-creator). Immagine per uso didattico; verifica i diritti prima di un uso pubblico.',
     featured: true,
     levels: ['Scuola secondaria', 'Approfondimento'],
     hotspots,
@@ -578,18 +691,86 @@ function sendImage(res, img) {
 async function serveStatic(req, res) { const requestPath = req.url === '/' ? '/index.html' : new URL(req.url, 'http://localhost').pathname; const filePath = resolve(ROOT, `.${normalize(requestPath)}`); if (!filePath.startsWith(ROOT)) return (res.writeHead(403), res.end('Forbidden')); try { const info = await stat(filePath); if (!info.isFile()) throw new Error(); const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.jsx': 'text/javascript; charset=utf-8', '.jpg': 'image/jpeg' }; res.writeHead(200, { 'Content-Type': types[extname(filePath)] || 'application/octet-stream', 'Cache-Control': 'no-cache' }); res.end(await readFile(filePath)); } catch { res.writeHead(404); res.end('Not Found'); } }
 export function createAppServer() { return createServer((req, res) => { if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); res.end(); return; }
 
-    // ---------- scheda pubblicata da artest-creator (sola lettura dal DB SQLite) ----------
+    // ---------- scheda pubblicata da noesis-roads-creator (sola lettura dal DB SQLite) ----------
     if (req.method === 'GET' && req.url === '/api/library') {
-      let artworks = [], subjects = [], comparisons = [];
+      let artworks = [], subjects = [], comparisons = [], schede = [];
       try { artworks = listReadyArtworksRO().map(catalogArtwork); } catch (e) {}
       try { subjects = listReadySubjectsRO().map(catalogSubject); } catch (e) {}
       try { comparisons = listReadyComparisonsRO().map(catalogComparison); } catch (e) {}
-      return json(res, 200, { artworks, subjects, comparisons, source: 'artest-creator' });
+      try {
+        schede = listReadySchedeRO()
+          .map((s) => getSchedaFullRO(s.id))
+          .filter(Boolean)
+          .map(catalogScheda);
+      } catch (e) {}
+      return json(res, 200, { artworks, subjects, comparisons, cards: schede, source: 'noesis-roads-creator' });
+    }
+    // ---------- nucleo generico (sola lettura) ----------
+    if (req.method === 'GET' && req.url === '/api/materie') {
+      let materie = [];
+      try { materie = listMaterieRO(); } catch (e) {}
+      return json(res, 200, { materie });
+    }
+    if (req.method === 'GET' && req.url && /^\/api\/models(\?.*)?$/.test(req.url)) {
+      const subject = new URL(req.url, 'http://localhost').searchParams.get('subject') || '';
+      if (!subject) return json(res, 400, error('INVALID_REQUEST', 'Parametro subject obbligatorio'));
+      let models = [];
+      try { models = listModelliRO(subject); } catch (e) {}
+      return json(res, 200, { models });
+    }
+    if (req.method === 'GET' && req.url && /^\/api\/cards\/[^/]+$/.test(req.url)) {
+      const id = decodeURIComponent(req.url.split('/')[3]);
+      let payload = null;
+      try { payload = dbSchedaPayload(id); } catch (e) {}
+      if (!payload) return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica la scheda da noesis-roads-creator'));
+      return json(res, 200, payload);
+    }
+    if (req.method === 'GET' && req.url && /^\/api\/cards\/[^/]+\/images\/\d+$/.test(req.url)) {
+      const parts = req.url.split('/');
+      let img = null;
+      try {
+        img = getImmagineRO(Number(parts[5]));
+        if (img && String(img.schedaId) !== decodeURIComponent(parts[3])) img = null;
+      } catch (e) {}
+      return sendImage(res, img);
+    }
+    // ---------- PDF "libro d'arte" in sola lettura (stessi builder del creator) ----------
+    if ((req.method === 'GET' || req.method === 'HEAD') && req.url && /^\/api\/artworks\/[^/]+\/pdf$/.test(req.url)) {
+      const id = decodeURIComponent(req.url.split('/')[3]);
+      let full = null;
+      try { full = artworkFullRO(id); } catch (e) {}
+      if (!full) return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica l’opera da noesis-roads-creator'));
+      if (!full.overview && !(full.details || []).length) return json(res, 400, error('EMPTY_CARD', PDF_GATE));
+      return sendPdf(res, buildArtworkPdfPayload(full, pdfIoRO()), slugify(full.title || 'opera') + '.pdf');
+    }
+    if ((req.method === 'GET' || req.method === 'HEAD') && req.url && /^\/api\/subjects\/[^/]+\/pdf$/.test(req.url)) {
+      const id = decodeURIComponent(req.url.split('/')[3]);
+      let full = null;
+      try { full = getSubjectRO(id); } catch (e) {}
+      if (!full) return json(res, 404, error('NOT_FOUND', 'Soggetto non trovato: pubblica la scheda da noesis-roads-creator'));
+      if (!full.intro && !full.origins && !(full.chapters || []).length) return json(res, 400, error('EMPTY_CARD', PDF_GATE));
+      return sendPdf(res, buildSubjectPdfPayload(full, pdfIoRO()), slugify(full.name || 'soggetto') + '.pdf');
+    }
+    if ((req.method === 'GET' || req.method === 'HEAD') && req.url && /^\/api\/comparisons\/[^/]+\/pdf$/.test(req.url)) {
+      const id = decodeURIComponent(req.url.split('/')[3]);
+      let full = null;
+      try { full = getComparisonRO(id); } catch (e) {}
+      if (!full) return json(res, 404, error('NOT_FOUND', 'Confronto non trovato: pubblica la scheda da noesis-roads-creator'));
+      if (!full.intro && !(full.points || []).length) return json(res, 400, error('EMPTY_CARD', PDF_GATE));
+      return sendPdf(res, buildComparisonPdfPayload(full, pdfIoRO()), slugify(full.title || 'confronto') + '.pdf');
+    }
+    if ((req.method === 'GET' || req.method === 'HEAD') && req.url && /^\/api\/cards\/[^/]+\/pdf$/.test(req.url)) {
+      const id = decodeURIComponent(req.url.split('/')[3]);
+      let full = null;
+      try { full = getSchedaFullRO(id); } catch (e) {}
+      if (!full || full.stato !== 'ready') return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica la scheda da noesis-roads-creator'));
+      if (!(full.sezioni || []).length) return json(res, 400, error('EMPTY_CARD', PDF_GATE));
+      return sendPdf(res, buildGenericPdfPayload(full, pdfIoRO()), slugify(full.titolo || 'scheda') + '.pdf');
     }
     if (req.method === 'GET' && req.url && /^\/api\/subjects\/[^/]+$/.test(req.url)) {
       let payload = null;
       try { payload = dbSubjectPayload(decodeURIComponent(req.url.split('/')[3])); } catch (e) {}
-      if (!payload) return json(res, 404, error('NOT_FOUND', 'Soggetto non trovato: pubblica la scheda da artest-creator'));
+      if (!payload) return json(res, 404, error('NOT_FOUND', 'Soggetto non trovato: pubblica la scheda da noesis-roads-creator'));
       return json(res, 200, payload);
     }
     if (req.method === 'GET' && req.url && /^\/api\/subjects\/[^/]+\/works\/\d+\/image$/.test(req.url)) {
@@ -601,7 +782,7 @@ export function createAppServer() { return createServer((req, res) => { if (req.
     if (req.method === 'GET' && req.url && /^\/api\/comparisons\/[^/]+$/.test(req.url)) {
       let payload = null;
       try { payload = dbComparisonPayload(decodeURIComponent(req.url.split('/')[3])); } catch (e) {}
-      if (!payload) return json(res, 404, error('NOT_FOUND', 'Confronto non trovato: pubblica la scheda da artest-creator'));
+      if (!payload) return json(res, 404, error('NOT_FOUND', 'Confronto non trovato: pubblica la scheda da noesis-roads-creator'));
       return json(res, 200, payload);
     }
     if (req.method === 'GET' && req.url && /^\/api\/comparisons\/[^/]+\/thumb$/.test(req.url)) {
@@ -622,7 +803,7 @@ export function createAppServer() { return createServer((req, res) => { if (req.
       const id = decodeURIComponent(req.url.split('/')[3]);
       let payload = null;
       try { payload = dbArtworkPayload(id); } catch (e) {}
-      if (!payload) return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica l’opera da artest-creator'));
+      if (!payload) return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica l’opera da noesis-roads-creator'));
       return json(res, 200, payload);
     }
     if (similarMatch) {

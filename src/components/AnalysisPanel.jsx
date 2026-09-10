@@ -1,4 +1,4 @@
-// Pannello di lettura per i contenuti STORED (scheda didattica salvata nel DB di artest-creator).
+// Pannello di lettura per i contenuti STORED (scheda didattica salvata nel DB di noesis-roads-creator).
 // Mostra le sezioni della tab attiva senza chiamate live: le due tab ("Studio del dettaglio"
 // e "Approfondimento") sono popolate dai campi corrispondenti del DB.
 var LEVELS = ['Scuola secondaria', 'Approfondimento'];
@@ -152,7 +152,7 @@ function AnalysisPanel({ artwork, selectedHotspot, storedAnalyses, missingConten
           <div className="empty-orbit"><Icon name="sparkle" size={26} /></div>
           <h3>Guarda più da vicino</h3>
           <p>Scegli uno dei dettagli suggeriti (sotto l’immagine o direttamente sull’opera): si aprono qui le due letture della scheda — “Studio del dettaglio” e “Approfondimento”.</p>
-          <div className="empty-tip"><Icon name="info" size={16} /> I contenuti provengono dalla scheda didattica pubblicata in artest-creator: nessuna generazione al volo.</div>
+          <div className="empty-tip"><Icon name="info" size={16} /> I contenuti provengono dalla scheda didattica pubblicata in noesis-roads-creator: nessuna generazione al volo.</div>
         </div>
       )}
 

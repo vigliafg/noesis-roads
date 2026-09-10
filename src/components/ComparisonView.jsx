@@ -1,4 +1,4 @@
-// Scheda "Faccia a faccia" letta dal DB (artest-creator): due opere affiancate,
+// Scheda "Faccia a faccia" letta dal DB (noesis-roads-creator): due opere affiancate,
 // punti in comune, differenze, tecnica/contesto/critica/curiosità a confronto.
 
 function countWords(text) { return String(text || '').split(/\s+/).filter(Boolean).length; }
@@ -27,10 +27,13 @@ function ComparisonView({ comparison, onBack }) {
       <header className="explore-header">
         <div className="explore-header-left">
           <a href="#" className="brand" onClick={(event) => { event.preventDefault(); onBack(); }} aria-label="Torna alla collezione"><span className="brand-mark"><i></i><i></i><i></i></span><span>leggi l’<strong>opera</strong></span></a>
-          <button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all’hub di Artest"><span>←</span> Hub</button>
+          <button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all’hub di Noesis Roads"><span>←</span> Hub</button>
         </div>
         <div className="explore-progress"><span>03</span><i></i><span>Faccia a faccia</span></div>
-        <button className="back-button" onClick={onBack}><span className="back-icon">←</span> Torna alla collezione</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <a className="back-button" href={'/api/comparisons/' + encodeURIComponent(comparison.id) + '/pdf'} title="Scarica il PDF libro d'arte">⬇ PDF</a>
+          <button className="back-button" onClick={onBack}><span className="back-icon">←</span> Torna alla collezione</button>
+        </div>
       </header>
       <section className="explore-intro">
         <div>
@@ -123,7 +126,7 @@ function ComparisonView({ comparison, onBack }) {
               {comparison.curiosities ? <div className="overview-col"><h3>Curiosità</h3><p style={contentStyle}>{comparison.curiosities}</p></div> : null}
             </div>
             <div className="overview-foot"><span className="overview-count">{wordCount} parole</span></div>
-            <p className="overview-disclaimer">Scheda di confronto generata con intelligenza artificiale (artest-creator) e verificata in fase di pubblicazione.</p>
+            <p className="overview-disclaimer">Scheda di confronto generata con intelligenza artificiale (noesis-roads-creator) e verificata in fase di pubblicazione.</p>
           </div>
         </section>
       )}
