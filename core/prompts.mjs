@@ -10,7 +10,7 @@ const COMMON_RULES = [
 ].join(' ');
 
 const TYPE_HINTS = {
-  text: 'Scrivi un testo continuo, ben strutturato.',
+  text: 'Rispondi con {"text":"..."}: un testo continuo, ben strutturato.',
   epochs: 'Rispondi con {"chapters":[{"era":"...","text":"..."}]}: 5-6 capitoli in ordine cronologico, autori reali.',
   works: 'Rispondi con {"works":[{"title":"...","artist":"...","date":"...","museum":"...","caption":"... max 25 parole"}]}: solo opere reali.',
   points: 'Rispondi con {"items":[{"title":"...","text":"..."}]}: voci numerate, una tesi per voce.',

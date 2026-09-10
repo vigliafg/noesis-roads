@@ -548,3 +548,87 @@ test('Viewer PDF: libro d\u2019arte per i 4 tipi + gate (sola lettura)', async (
     await rmDir4(dir, { recursive: true, force: true });
   }
 });
+
+test('generate sezione: percorso completo con OpenRouter simulato (regressione normalizeSectionBody)', async () => {
+  const { mkdtemp: mkd5, rm: rmDir5 } = await import('node:fs/promises');
+  const { tmpdir: tmpDir5 } = await import('node:os');
+  const { join: joinPath5 } = await import('node:path');
+  const { fork: forkProc5 } = await import('node:child_process');
+  const { writeFile: writeTmp5 } = await import('node:fs/promises');
+  const { createServer: httpServer } = await import('node:http');
+  const dir = await mkd5(joinPath5(tmpDir5(), 'noesis-gen-'));
+  const dbPath = joinPath5(dir, 'g.db');
+  const previousDb = process.env.NOESIS_CREATOR_DB;
+  process.env.NOESIS_CREATOR_DB = dbPath;
+  let child, stub;
+  try {
+    // Stub OpenRouter: risposta JSON valida per la sezione nuclei.
+    let calls = 0;
+    stub = httpServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        calls += 1;
+        const payload = { choices: [{ message: { content: '{"items":[{"title":"Critica","text":"Limiti della ragione."},{"title":"Etica","text":"Agisci per dovere."}]}', annotations: [] } }] };
+        const data = Buffer.from(JSON.stringify(payload));
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': data.length });
+        res.end(data);
+      });
+    });
+    await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+    const stubUrl = 'http://127.0.0.1:' + stub.address().port + '/chat/completions';
+
+    const serverAbs = joinPath5(process.cwd(), 'noesis-roads-creator', 'server.mjs');
+    const tmpScript = joinPath5(dir, 'spawn.mjs');
+    await writeTmp5(tmpScript, [
+      `import { createCreatorServer } from 'file://${serverAbs}';`,
+      'const s = createCreatorServer();',
+      's.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port) + "\\n"); });',
+    ].join('\n'));
+    child = forkProc5(tmpScript, [], {
+      env: { ...process.env, NOESIS_CREATOR_DB: dbPath, OPENROUTER_API_KEY: 'test-key', OPENROUTER_ENDPOINT: stubUrl, OPENROUTER_RPM: '60' },
+      silent: true,
+    });
+    const port = await new Promise((resolve, reject) => {
+      let out = '';
+      const timer = setTimeout(() => reject(new Error('timeout subserver')), 15000);
+      child.stdout.on('data', (c) => {
+        out += String(c);
+        const nl = out.indexOf('\n');
+        if (nl >= 0) { clearTimeout(timer); resolve(Number(out.slice(0, nl).trim())); }
+      });
+      child.on('error', (e) => { clearTimeout(timer); reject(e); });
+      child.on('exit', (code) => { clearTimeout(timer); reject(new Error('subserver uscito, codice ' + code)); });
+    });
+    const base = 'http://127.0.0.1:' + port;
+    const asJson = (method, path, body) => fetch(base + path, {
+      method, headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+
+    let r = await asJson('POST', '/api/cards', { id: 'gen-1', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Kant' });
+    assert.equal(r.status, 201);
+    r = await asJson('POST', '/api/cards/gen-1/generate/nuclei', {});
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.warnings, []);
+    assert.equal(r.body.section.corpo.items.length, 2);
+    assert.equal(r.body.section.corpo.items[0].title, 'Critica');
+    assert.equal(calls, 1);
+    // Rilettura: la sezione è persistita
+    r = await asJson('GET', '/api/cards/gen-1');
+    assert.ok(r.body.sezioni.some((s) => s.chiave === 'nuclei' && s.corpo.items.length === 2));
+    // Sezione image: 400 senza toccare l'LLM
+    r = await asJson('POST', '/api/cards/gen-1/generate/opere', {});
+    assert.equal(r.status, 200); // works: normalizza la stessa risposta stub
+    assert.ok(Array.isArray(r.body.section.corpo.works));
+  } finally {
+    if (child) {
+      try { child.kill('SIGTERM'); } catch {}
+      await new Promise((r2) => setTimeout(r2, 50));
+      try { child.kill('SIGKILL'); } catch {}
+    }
+    if (stub) await new Promise((r2) => stub.close(r2));
+    if (previousDb === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previousDb;
+    await rmDir5(dir, { recursive: true, force: true });
+  }
+});

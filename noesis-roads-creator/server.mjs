@@ -958,6 +958,7 @@ function handleApi(req, res, urlPath) {
         const raw = await callModel(TEXT_MODEL, [{ type: 'text', text: prompt }], apiKey);
         const corpo = normalizeSectionBody(def.type, raw.data);
         const warnings = validateBody(def.type, corpo);
+        if (isBodyEmpty(def.type, corpo)) warnings.push('sezione vuota: il modello non ha restituito contenuti, riprova la generazione');
         const saved = saveSezione(parts[2], parts[4], corpo);
         return json(res, 200, { section: saved, warnings });
       } catch (e) { console.error('ERR genSection:', e); return err(res, 500, e.message); }
@@ -1162,6 +1163,7 @@ export {
 } from './pdf-payloads.mjs';
 import {
   buildArtworkPdfPayload, buildSubjectPdfPayload, buildComparisonPdfPayload, buildGenericPdfPayload,
+  normalizeSectionBody,
 } from './pdf-payloads.mjs';
 
 async function renderPdf(payload) {

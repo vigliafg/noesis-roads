@@ -298,8 +298,11 @@ test('static server serves the provided artwork and app', async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   const app = await fetch(`http://127.0.0.1:${port}/`);
+  const withQuery = await fetch(`http://127.0.0.1:${port}/?materia=filosofia`);
   const image = await fetch(`http://127.0.0.1:${port}/annunciazione-beato-angelico.jpg`);
   assert.equal(app.status, 200);
+  assert.equal(withQuery.status, 200); // la home con query (filtro materia) serve index.html
+  assert.ok((await withQuery.text()).includes('catalog'));
   assert.equal(image.status, 200);
   assert.equal(image.headers.get('content-type'), 'image/jpeg');
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

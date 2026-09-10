@@ -362,6 +362,9 @@ async function acquireRateSlot() {
   }
 }
 
+// Timeout per singola chiamata: senza, un socket appeso blocca la pipeline per sempre.
+// Lo scadere abortisce la fetch -> errore -> backoff + retry nel ciclo sotto.
+const MODEL_TIMEOUT_MS = Math.max(10000, Number(process.env.OPENROUTER_TIMEOUT_MS || 120000));
 export async function callModel(model, content, apiKey, fetchImpl = globalThis.fetch) {
   const body = { model, messages: [{ role: 'user', content }], temperature: 0.2, top_p: 0.7, max_tokens: 8000, stream: false };
   if (webSearchEnabled()) body.plugins = [{ id: 'web', max_results: 5 }];
@@ -371,7 +374,7 @@ export async function callModel(model, content, apiKey, fetchImpl = globalThis.f
   for (let attempt = 0; attempt < 3; attempt++) {
     await acquireRateSlot();
     try {
-      response = await fetchImpl(OPENROUTER_ENDPOINT, { method: 'POST', headers, body: JSON.stringify(body) });
+      response = await fetchImpl(OPENROUTER_ENDPOINT, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) });
       if (response.status !== 429) break;
       lastError = new Error('Limite temporaneo di OpenRouter raggiunto');
     } catch (e) { lastError = e; }
@@ -688,7 +691,7 @@ function sendImage(res, img) {
   res.end(buf);
 }
 
-async function serveStatic(req, res) { const requestPath = req.url === '/' ? '/index.html' : new URL(req.url, 'http://localhost').pathname; const filePath = resolve(ROOT, `.${normalize(requestPath)}`); if (!filePath.startsWith(ROOT)) return (res.writeHead(403), res.end('Forbidden')); try { const info = await stat(filePath); if (!info.isFile()) throw new Error(); const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.jsx': 'text/javascript; charset=utf-8', '.jpg': 'image/jpeg' }; res.writeHead(200, { 'Content-Type': types[extname(filePath)] || 'application/octet-stream', 'Cache-Control': 'no-cache' }); res.end(await readFile(filePath)); } catch { res.writeHead(404); res.end('Not Found'); } }
+async function serveStatic(req, res) { const pathname = new URL(req.url, 'http://localhost').pathname; const requestPath = pathname === '/' ? '/index.html' : pathname; const filePath = resolve(ROOT, `.${normalize(requestPath)}`); if (!filePath.startsWith(ROOT)) return (res.writeHead(403), res.end('Forbidden')); try { const info = await stat(filePath); if (!info.isFile()) throw new Error(); const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.jsx': 'text/javascript; charset=utf-8', '.jpg': 'image/jpeg' }; res.writeHead(200, { 'Content-Type': types[extname(filePath)] || 'application/octet-stream', 'Cache-Control': 'no-cache' }); res.end(await readFile(filePath)); } catch { res.writeHead(404); res.end('Not Found'); } }
 export function createAppServer() { return createServer((req, res) => { if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); res.end(); return; }
 
     // ---------- scheda pubblicata da noesis-roads-creator (sola lettura dal DB SQLite) ----------

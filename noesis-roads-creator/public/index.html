@@ -270,11 +270,13 @@ h1,h2,h3{font-family:'Playfair Display',Georgia,serif;letter-spacing:-.04em}
 <script>
 'use strict';
 /* ================= stato ================= */
-var state = { view: 'home', homeTab: 'all', artwork: null, list: [], cards: [], busy: {}, log: [] };
+var state = { view: 'home', homeTab: 'all', artwork: null, list: [], cards: [], materie: [], modelliPerMateria: {}, busy: {}, log: [] };
 
 /* ================= api ================= */
 function api(path, opts) {
-  return fetch(path, opts || {}).then(function (res) {
+  // Timeout client: una richiesta appesa non deve bloccare la pipeline per sempre.
+  var o = Object.assign({ signal: AbortSignal.timeout(150000) }, opts || {});
+  return fetch(path, o).then(function (res) {
     return res.json().catch(function () { return {}; }).then(function (body) {
       if (!res.ok) { var e = new Error((body.error && body.error.message) || ('HTTP ' + res.status)); e.status = res.status; e.body = body; throw e; }
       return body;
@@ -412,6 +414,28 @@ function homeTypeHeader(title, count, tabKey) {
   return '<div class="type-head"><h2>' + esc(title) + '</h2>' +
     '<button class="type-tag tag-btn" data-tab="' + tabKey + '" title="Mostra solo questa sezione">' + count + ' ' + (count === 1 ? 'scheda' : 'schede') + '</button></div>';
 }
+function homeMaterieCreate() {
+  if (!state.materie.length) return '';
+  var html = '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">Nuova scheda per materia</span></div>';
+  html += '<div class="grid-artworks">';
+  state.materie.forEach(function (m) {
+    var modelli = state.modelliPerMateria[m.id] || [];
+    html += '<div class="subj-card"><span class="s-ico">' + esc((m.nome || '?').charAt(0)) + '</span>' +
+      '<h3>' + esc(m.nome || m.id) + '</h3>' +
+      '<p>' + esc(m.descrizione || 'Schede didattiche.') + '</p><div class="actions" style="flex-direction:column;align-items:stretch">';
+    if (!modelli.length) {
+      html += '<span class="step-note">Caricamento modelli…</span>';
+    } else {
+      modelli.forEach(function (mod) {
+        var sid = mod.id || (mod.materiaId + ':' + mod.chiave + ':v' + mod.versione);
+        html += '<button class="btn small" data-new-model="' + esc(sid) + '">+ ' + esc(mod.nome || mod.chiave) + '</button>';
+      });
+    }
+    html += '</div></div>';
+  });
+  html += '</div></div>';
+  return html;
+}
 function homeSectionBody() {
   // Corpo della sezione attiva (tab). Il markup è lo stesso delle tre sezioni stacked.
   var html = '';
@@ -495,7 +519,8 @@ function renderHome() {
     '<button class="btn small" data-nav="new-comparison">+ Nuovo confronto</button>' +
     '<button class="btn small" data-nav="new-card">+ Nuova scheda</button>');
   html += '<h1 class="page-title">Crea le schede didattiche</h1>';
-  html += '<p class="lead">Tre tipi storici (dipinto, soggetto, confronto) più le <strong>schede generiche per materia</strong> (arte, filosofia…): scegli il modello, genera le sezioni con l’AI, rivedi e approva. L’intelligenza artificiale propone i contenuti, tu controlli, correggi e salvi.</p>';
+  html += '<p class="lead">Scegli la materia e il modello: l’editor segue lo schema, l’AI genera le sezioni, tu rivedi e approvi. Restano i tre tipi storici dell’arte (dipinto, soggetto, confronto).</p>';
+  html += homeMaterieCreate();
   // Filtri a tab come nel catalogo del viewer: «Tutte» + una voce per tipo, con contatore.
   var tabs = [
     ['all', 'Tutte', state.list.length + state.subjects.length + state.comparisons.length + state.cards.length],
@@ -2127,6 +2152,8 @@ function bindGlobal() {
     if (dc) { e.preventDefault(); removeComparison(dc.getAttribute('data-del-comparison')); return; }
     var ocg = e.target.closest('[data-open-card]');
     if (ocg) { e.preventDefault(); openCardStudio(ocg.getAttribute('data-open-card')); return; }
+    var nm = e.target.closest('[data-new-model]');
+    if (nm) { e.preventDefault(); newCardStudio(nm.getAttribute('data-new-model')); return; }
     var dcg = e.target.closest('[data-del-card]');
     if (dcg) { e.preventDefault(); removeCard(dcg.getAttribute('data-del-card')); return; }
     var pipe = e.target.closest('[data-pipe]');
@@ -2187,6 +2214,33 @@ function refreshCardMaterie() {
     });
     render();
   }).catch(function (e) { toast(e.message); });
+}
+function newCardStudio(modelloId) {
+  cardStudio = new CardStudioView();
+  state.view = 'card-studio';
+  var parts = String(modelloId || '').split(':');
+  cardStudio.materiaId = parts[0] || '';
+  cardStudio.modelloId = modelloId;
+  cardStudio.materie = state.materie.slice();
+  var cached = (state.modelliPerMateria[cardStudio.materiaId] || []).slice();
+  cardStudio.modelli = cached;
+  render();
+  var ensure = function () {
+    if (cardStudio.modelli.length) { render(); return; }
+    api('/api/models?subject=' + encodeURIComponent(cardStudio.materiaId)).then(function (m) {
+      cardStudio.modelli = m.models || [];
+      render();
+    }).catch(function (e) { toast(e.message); });
+  };
+  if (!cardStudio.materie.length) {
+    api('/api/materie').then(function (r) {
+      cardStudio.materie = r.materie || [];
+      ensure();
+    }).catch(function (e) { toast(e.message); });
+  } else {
+    ensure();
+  }
+  setTimeout(function () { var el = document.getElementById('csTitolo'); if (el) el.focus(); }, 50);
 }
 function openCardStudio(id) {
   cardStudio = new CardStudioView();
@@ -2334,7 +2388,13 @@ function bindCardStudio(s) {
   var mat = document.getElementById('csMateria');
   if (mat) mat.onchange = function () {
     s.materiaId = mat.value; s.modelloId = ''; s.modelli = [];
-    if (!s.id) { api('/api/models?subject=' + encodeURIComponent(s.materiaId)).then(function (m) { s.modelli = m.models || []; render(); }).catch(function (e) { toast(e.message); }); }
+    if (!s.id) {
+      api('/api/models?subject=' + encodeURIComponent(s.materiaId)).then(function (m) {
+        s.modelli = m.models || [];
+        if (s.modelli.length) s.modelloId = s.modelli[0].id || (s.modelli[0].materiaId + ':' + s.modelli[0].chiave + ':v' + s.modelli[0].versione);
+        render();
+      }).catch(function (e) { toast(e.message); });
+    }
   };
   var mod = document.getElementById('csModello');
   if (mod) mod.onchange = function () { s.modelloId = mod.value; };
@@ -2480,13 +2540,21 @@ function cardGenAll(s, btn) {
 
 /* ---------- home actions ---------- */
 function refreshList() {
-  Promise.all([api('/api/artworks'), api('/api/subjects'), api('/api/comparisons'), api('/api/cards').catch(function () { return { cards: [] }; })]).then(function (results) {
+  Promise.all([api('/api/artworks'), api('/api/subjects'), api('/api/comparisons'), api('/api/cards').catch(function () { return { cards: [] }; }), api('/api/materie').catch(function () { return { materie: [] }; })]).then(function (results) {
     state.list = results[0].artworks || [];
     state.subjects = results[1].subjects || [];
     state.comparisons = results[2].comparisons || [];
     state.cards = results[3].cards || [];
+    state.materie = results[4].materie || [];
     state.view = 'home';
     render();
+    // Modelli per materia (bottoni di creazione guidata): in parallelo, senza bloccare la home.
+    state.materie.forEach(function (m) {
+      api('/api/models?subject=' + encodeURIComponent(m.id)).then(function (r) {
+        state.modelliPerMateria[m.id] = r.models || [];
+        if (state.view === 'home') render();
+      }).catch(function () {});
+    });
   }).catch(function (e) { toast(e.message); });
 }
 function removeArtwork(id) {
