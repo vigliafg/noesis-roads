@@ -734,6 +734,11 @@ test('API wizard: materie/modelli/sezioni/fork + sezioniAttive + preview', async
     r = await asJson('POST', '/api/models', { materiaId: 'filosofia', chiave: 'autore2', nome: 'Autore 2', fromTemplate: 'filosofia:autore-pensiero:v1' });
     assert.equal(r.status, 201);
     assert.ok(r.body.model.schema.sections.length >= 5); // clone ereditato
+    r = await asJson('POST', '/api/materie', { id: 'encoe', nome: 'Enoches' });
+    assert.equal(r.status, 201);
+    r = await asJson('POST', '/api/models', { materiaId: 'encoe', chiave: 'autore2', nome: 'Autore 2', fromTemplate: 'filosofia:autore-pensiero:v1' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.model.schema.cover.eyebrow, 'Scheda didattica · Enoches'); // clone tra materie: eyebrow adattata
     r = await asJson('DELETE', '/api/models/' + encodeURIComponent(r.body.model.id));
     assert.equal(r.status, 200); // senza schede: si elimina
 

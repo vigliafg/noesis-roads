@@ -968,6 +968,11 @@ function handleApi(req, res, urlPath) {
           schema = JSON.parse(JSON.stringify(tpl.schema));
           schema.key = chiave; schema.subject = materiaId; schema.name = nome; schema.version = 1;
           schema.cover = tpl.schema.cover || { eyebrow: 'Scheda didattica', heroRole: 'hero' };
+          if ((tpl.subject || tpl.materiaId) && (tpl.subject || tpl.materiaId) !== materiaId) {
+            // Clone tra materie diverse: l'eyebrow segue la materia di destinazione.
+            const mat = getMateria(materiaId);
+            schema.cover = { ...schema.cover, eyebrow: 'Scheda didattica · ' + (mat ? mat.nome : materiaId) };
+          }
           // Sezioni esplicite: sostituiscono il clone (wizard con modifiche).
           if (Array.isArray(input.sections) && input.sections.length) schema.sections = input.sections;
         } else {

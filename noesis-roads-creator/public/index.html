@@ -2355,6 +2355,7 @@ function renderCardStudio() {
     });
     html += '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:20px">' +
       '<button class="btn primary" id="csGenAll" style="padding:14px 22px">⚡ Genera tutte le sezioni</button>' +
+      '<button class="btn" id="csGenMissing" style="padding:14px 22px">✨ Genera mancanti</button>' +
       '<button class="btn green" id="csApprove" style="padding:14px 22px">✅ Approva</button>' +
       '<button class="btn ghost" id="csDelete">🗑 Elimina</button>' +
       '<span class="step-note" id="csNote">Genera o compila le sezioni, salva ciascuna, poi approva.</span></div>';
@@ -2579,7 +2580,12 @@ function bindCardStudio(s) {
     };
   });
   var all = document.getElementById('csGenAll');
-  if (all) all.onclick = function () { cardGenAll(s, all); };
+  if (all) all.onclick = function () {
+    if (!confirm('Rigenerare TUTTE le sezioni? I contenuti già scritti (anche a mano) saranno sovrascritti.')) return;
+    cardGenAll(s, all, false);
+  };
+  var miss = document.getElementById('csGenMissing');
+  if (miss) miss.onclick = function () { cardGenAll(s, miss, true); };
   var approve = document.getElementById('csApprove');
   if (approve) approve.onclick = function () {
     approve.disabled = true;
@@ -2617,12 +2623,30 @@ function cardGenSection(s, key, btn) {
     if (btn) { btn.disabled = false; btn.innerHTML = old; }
   }).catch(function (e) { toast(e.message); if (btn) { btn.disabled = false; btn.innerHTML = old; } });
 }
-function cardGenAll(s, btn) {
+function cardIsEmpty(type, corpo) {
+  var b = corpo || {};
+  if (type === 'text') return !String(b.text || '').trim();
+  if (type === 'epochs') return !(b.chapters || []).length;
+  if (type === 'works') return !(b.works || []).length;
+  if (type === 'points') return !(b.items || []).length;
+  if (type === 'kv') return !(b.entries || []).length;
+  if (type === 'pair') {
+    var pa = b.a || {}, pb = b.b || {};
+    return (!String(pa.title || '').trim() && !String(pa.text || '').trim()) &&
+      (!String(pb.title || '').trim() && !String(pb.text || '').trim());
+  }
+  if (type === 'image') return !String(b.caption || '').trim();
+  return false;
+}
+function cardGenAll(s, btn, onlyMissing) {
   var defs = cardActiveDefs(s).filter(function (d) { return d.type !== 'image'; });
+  if (onlyMissing) defs = defs.filter(function (d) { return cardIsEmpty(d.type, s.corpi[d.key]); });
+  if (onlyMissing && !defs.length) { toast('Niente da generare: tutte le sezioni hanno già contenuti', true); return; }
   var i = 0;
+  var label = onlyMissing ? '✨ Genera mancanti' : '⚡ Genera tutte le sezioni';
   btn.disabled = true;
   var step = function () {
-    if (i >= defs.length) { btn.disabled = false; btn.innerHTML = '⚡ Genera tutte le sezioni'; toast('Generazione completa: rivedi e salva', true); render(); return; }
+    if (i >= defs.length) { btn.disabled = false; btn.innerHTML = label; toast('Generazione completa: rivedi e salva', true); render(); return; }
     btn.innerHTML = '⚡ Generazione ' + (i + 1) + '/' + defs.length + '…';
     var key = defs[i].key;
     post('/api/cards/' + encodeURIComponent(s.id) + '/generate/' + encodeURIComponent(key), {}).then(function (r) {
