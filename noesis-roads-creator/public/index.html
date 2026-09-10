@@ -227,6 +227,7 @@ h1,h2,h3{font-family:'Playfair Display',Georgia,serif;letter-spacing:-.04em}
 .side-box select,.side-box input,.side-box textarea{width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12px;background:var(--white);color:var(--ink);margin-top:4px;box-sizing:border-box}
 .side-preview{width:100%;max-height:150px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#eeeae3;margin-top:8px}
 .chapter-row{display:grid;grid-template-columns:220px 1fr auto;gap:10px;align-items:start;border:1px solid var(--line);border-radius:9px;padding:10px;background:var(--white);margin-bottom:8px}
+.check-list{display:flex;flex-direction:column;gap:6px}.check-item{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--white);cursor:pointer}.check-item input{margin-top:3px;transform:scale(1.2)}.check-item strong{font-size:12px}.check-item small{color:var(--muted)}.wiz-steps{display:flex;gap:8px;margin:0 0 18px}.wiz-step{flex:1;text-align:center;font-size:11px;font-weight:700;color:var(--muted);border-bottom:3px solid var(--line);padding-bottom:8px}.wiz-step.on{color:var(--ink);border-color:var(--coral)}.wiz-step.done{color:var(--green);border-color:var(--green)}
 .chapter-row input,.chapter-row textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:8px;font-size:12px;font-family:inherit;box-sizing:border-box}
 .chapter-row textarea{min-height:64px;resize:vertical}
 .row-del{background:transparent;border:0;color:var(--coral);font-size:15px;cursor:pointer;padding:6px}
@@ -392,6 +393,7 @@ function render() {
   if (state.view === 'subject-studio') return renderSubjectStudio();
   if (state.view === 'comparison-studio') return renderComparisonStudio();
   if (state.view === 'card-studio') return renderCardStudio();
+  if (state.view === 'materia-wizard') return renderMateriaWizard();
   if (state.view === 'subject-viewer') return renderSubjectViewer();
   if (state.view === 'comparison-viewer') return renderComparisonViewer();
 }
@@ -428,7 +430,8 @@ function homeMaterieCreate() {
     } else {
       modelli.forEach(function (mod) {
         var sid = mod.id || (mod.materiaId + ':' + mod.chiave + ':v' + mod.versione);
-        html += '<button class="btn small" data-new-model="' + esc(sid) + '">+ ' + esc(mod.nome || mod.chiave) + '</button>';
+        html += '<div style="display:flex;gap:6px"><button class="btn small" style="flex:1" data-new-model="' + esc(sid) + '">+ ' + esc(mod.nome || mod.chiave) + '</button>' +
+          '<button class="btn small ghost" data-edit-model="' + esc(sid) + '" title="Modifica sezioni e prompt del modello">✎</button></div>';
       });
     }
     html += '</div></div>';
@@ -517,7 +520,8 @@ function renderHome() {
     '<button class="btn primary small" data-nav="new">+ Nuova opera</button>' +
     '<button class="btn small" data-nav="new-subject">+ Nuovo soggetto</button>' +
     '<button class="btn small" data-nav="new-comparison">+ Nuovo confronto</button>' +
-    '<button class="btn small" data-nav="new-card">+ Nuova scheda</button>');
+    '<button class="btn small" data-nav="new-card">+ Nuova scheda</button>' +
+    '<button class="btn small" data-nav="new-materia">+ Nuova materia</button>');
   html += '<h1 class="page-title">Crea le schede didattiche</h1>';
   html += '<p class="lead">Scegli la materia e il modello: l’editor segue lo schema, l’AI genera le sezioni, tu rivedi e approvi. Restano i tre tipi storici dell’arte (dipinto, soggetto, confronto).</p>';
   html += homeMaterieCreate();
@@ -2130,6 +2134,7 @@ function bindGlobal() {
       else if (dest === 'new-subject') { subjectStudio = new SubjectStudioView(); state.pipeline = null; state.view = 'subject-studio'; render(); }
       else if (dest === 'new-comparison') { comparisonStudio = new ComparisonStudioView(); state.pipeline = null; state.view = 'comparison-studio'; render(); }
       else if (dest === 'new-card') { cardStudio = new CardStudioView(); state.view = 'card-studio'; render(); refreshCardMaterie(); }
+      else if (dest === 'new-materia') { materiaWizard = new MateriaWizardView(); state.view = 'materia-wizard'; render(); }
       return;
     }
     var open = e.target.closest('[data-open]');
@@ -2154,6 +2159,8 @@ function bindGlobal() {
     if (ocg) { e.preventDefault(); openCardStudio(ocg.getAttribute('data-open-card')); return; }
     var nm = e.target.closest('[data-new-model]');
     if (nm) { e.preventDefault(); newCardStudio(nm.getAttribute('data-new-model')); return; }
+    var em = e.target.closest('[data-edit-model]');
+    if (em) { e.preventDefault(); editModelWizard(em.getAttribute('data-edit-model')); return; }
     var dcg = e.target.closest('[data-del-card]');
     if (dcg) { e.preventDefault(); removeCard(dcg.getAttribute('data-del-card')); return; }
     var pipe = e.target.closest('[data-pipe]');
@@ -2197,10 +2204,17 @@ function cardApplyFull(s, full) {
   s.modello = full.modello;
   s.modelloId = full.modello.id;
   s.materiaId = full.modello.materiaId;
+  s.attive = Array.isArray(full.sezioniAttive) ? full.sezioniAttive.slice() : null;
+  s.checked = null; // solo creazione: chiavi spuntate nel Passo 1
   s.corpi = {};
   (full.modello.schema.sections || []).forEach(function (def) { s.corpi[def.key] = cardEmptyBody(def.type); });
   (full.sezioni || []).forEach(function (sez) { s.corpi[sez.chiave] = sez.corpo || cardEmptyBody((full.modello.schema.sections.find(function (d) { return d.key === sez.chiave; }) || {}).type); });
   s.immagini = full.immagini || [];
+}
+function cardActiveDefs(s) {
+  var defs = ((s.modello && s.modello.schema && s.modello.schema.sections) || []);
+  if (!s.attive) return defs;
+  return defs.filter(function (d) { return s.attive.indexOf(d.key) >= 0; });
 }
 function refreshCardMaterie() {
   var s = cardStudio;
@@ -2258,6 +2272,51 @@ function removeCard(id) {
     refreshList();
   }).catch(function (e) { toast(e.message); });
 }
+function csSelectedModel(s) {
+  return (s.modelli || []).find(function (m) {
+    var sid = m.id || (m.materiaId + ':' + m.chiave + ':v' + m.versione);
+    return sid === s.modelloId;
+  }) || null;
+}
+function csModelKeys(s) {
+  var m = csSelectedModel(s);
+  var schema = m && (m.schema || (m.sections ? { sections: m.sections } : null));
+  return ((schema && schema.sections) || []).map(function (d) { return d.key; });
+}
+function csChecked(s) {
+  if (Array.isArray(s.checked)) return s.checked;
+  return csModelKeys(s);
+}
+// Passo 1: spunta le opzionali da includere (required sempre accese).
+function csSectionPicker(s) {
+  var m = csSelectedModel(s);
+  if (!m) return '';
+  var schema = m.schema || { sections: [] };
+  var sections = schema.sections || [];
+  if (!sections.length) return '<p class="step-note">Il modello non ha ancora sezioni.</p>';
+  var isNew = !s.id;
+  var canEdit = isNew || s.stato === 'draft';
+  var html = '<div class="field"><label>Sezioni della scheda</label><div class="check-list">';
+  sections.forEach(function (def) {
+    var on, locked = false;
+    if (isNew) {
+      on = csChecked(s).indexOf(def.key) >= 0 || !!def.required;
+      locked = !!def.required;
+    } else if (s.stato === 'ready') {
+      on = !s.attive || s.attive.indexOf(def.key) >= 0;
+      locked = true;
+    } else {
+      on = !s.attive || s.attive.indexOf(def.key) >= 0;
+      locked = !!def.required;
+    }
+    html += '<label class="check-item"><input type="checkbox" data-cs-att="' + esc(def.key) + '"' +
+      (on ? ' checked' : '') + (locked ? ' disabled' : '') + ' />' +
+      '<span><strong>' + esc(def.title) + '</strong> <small>' + esc(def.type) +
+      (def.required ? ' · obbligatoria' : ' · opzionale') + '</small></span></label>';
+  });
+  html += '</div>' + (canEdit ? '' : '<p class="step-note">Scheda pronta: le sezioni non si cambiano più.</p>') + '</div>';
+  return html;
+}
 function renderCardStudio() {
   var s = cardStudio;
   if (!s) { s = cardStudio = new CardStudioView(); }
@@ -2282,10 +2341,11 @@ function renderCardStudio() {
     '</select></div>' +
     '<div class="field"><label>Titolo della scheda</label><input id="csTitolo" value="' + esc(s.titolo) + '" placeholder="es. Kant e il criticismo" /></div>' +
     '</div>' +
+    '<div id="csSections">' + csSectionPicker(s) + '</div>' +
     (isNew ? '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" id="csCreate">Crea scheda</button></div>' : '') +
     '</div>';
   if (!isNew && s.modello) {
-    (s.modello.schema.sections || []).forEach(function (def) {
+    cardActiveDefs(s).forEach(function (def) {
       html += '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">' + esc(def.title) +
         (def.required ? ' · obbligatoria' : '') + ' · ' + esc(def.type) + '</span>' +
         '<span style="display:flex;gap:8px">' +
@@ -2392,12 +2452,18 @@ function bindCardStudio(s) {
       api('/api/models?subject=' + encodeURIComponent(s.materiaId)).then(function (m) {
         s.modelli = m.models || [];
         if (s.modelli.length) s.modelloId = s.modelli[0].id || (s.modelli[0].materiaId + ':' + s.modelli[0].chiave + ':v' + s.modelli[0].versione);
+        s.checked = null;
         render();
       }).catch(function (e) { toast(e.message); });
     }
   };
   var mod = document.getElementById('csModello');
-  if (mod) mod.onchange = function () { s.modelloId = mod.value; };
+  if (mod) mod.onchange = function () {
+    s.modelloId = mod.value;
+    s.checked = null;
+    var wrap = document.getElementById('csSections');
+    if (wrap) { wrap.innerHTML = csSectionPicker(s); bindCardStudio(s); }
+  };
   var tit = document.getElementById('csTitolo');
   if (tit) {
     var titTimer = null;
@@ -2412,7 +2478,11 @@ function bindCardStudio(s) {
   var create = document.getElementById('csCreate');
   if (create) create.onclick = function () {
     if (!s.modelloId) { toast('Scegli un modello di scheda'); return; }
-    post('/api/cards', { modelloId: s.modelloId, titolo: s.titolo }).then(function (r) {
+    var body = { modelloId: s.modelloId, titolo: s.titolo };
+    var all = csModelKeys(s);
+    var checked = csChecked(s);
+    if (checked.length < all.length) body.sezioniAttive = checked;
+    post('/api/cards', body).then(function (r) {
       return api('/api/cards/' + encodeURIComponent(r.card.id));
     }).then(function (full) {
       cardApplyFull(s, full);
@@ -2420,6 +2490,32 @@ function bindCardStudio(s) {
       render();
     }).catch(function (e) { toast(e.message); });
   };
+  appEl.querySelectorAll('[data-cs-att]').forEach(function (box) {
+    if (box.disabled) return;
+    box.onchange = function () {
+      var key = box.getAttribute('data-cs-att');
+      if (!s.id) {
+        // Creazione: le required sono bloccate in UI, qui cambiano solo le opzionali.
+        var cur = csChecked(s).slice();
+        var i = cur.indexOf(key);
+        if (box.checked && i < 0) cur.push(key);
+        if (!box.checked && i >= 0) cur.splice(i, 1);
+        s.checked = cur;
+        return;
+      }
+      if (s.stato !== 'draft') return;
+      var allKeys = ((s.modello && s.modello.schema && s.modello.schema.sections) || []).map(function (d) { return d.key; });
+      var base = s.attive ? s.attive.slice() : allKeys.slice();
+      if (box.checked && base.indexOf(key) < 0) base.push(key);
+      if (!box.checked) base = base.filter(function (k) { return k !== key; });
+      var next = allKeys.filter(function (k) { return base.indexOf(k) >= 0; });
+      patch('/api/cards/' + encodeURIComponent(s.id), { sezioniAttive: next }).then(function (r) {
+        s.attive = r.card.sezioniAttive;
+        toast('Sezioni aggiornate', true);
+        render();
+      }).catch(function (e) { toast(e.message); render(); });
+    };
+  });
   if (!s.id) return;
   // campi testo semplici
   appEl.querySelectorAll('[data-cs-text]').forEach(function (ta) {
@@ -2455,7 +2551,7 @@ function bindCardStudio(s) {
     btn.onclick = function () { cardSaveSection(s, btn.getAttribute('data-cs-save'), btn); };
   });
   // upload immagini per ruolo
-  (s.modello.schema.sections || []).filter(function (d) { return d.type === 'image'; }).forEach(function (def) {
+  cardActiveDefs(s).filter(function (d) { return d.type === 'image'; }).forEach(function (def) {
     var file = document.getElementById('cs-file-' + def.key);
     if (file) file.onchange = function () {
       var f = file.files && file.files[0];
@@ -2522,7 +2618,7 @@ function cardGenSection(s, key, btn) {
   }).catch(function (e) { toast(e.message); if (btn) { btn.disabled = false; btn.innerHTML = old; } });
 }
 function cardGenAll(s, btn) {
-  var defs = (s.modello.schema.sections || []).filter(function (d) { return d.type !== 'image'; });
+  var defs = cardActiveDefs(s).filter(function (d) { return d.type !== 'image'; });
   var i = 0;
   btn.disabled = true;
   var step = function () {
@@ -2536,6 +2632,396 @@ function cardGenAll(s, btn) {
     }).catch(function (e) { toast('Sezione ' + key + ': ' + e.message); i += 1; step(); });
   };
   step();
+}
+
+/* ---------- wizard nuova materia / modelli / sezioni+prompt (prompt-database) ---------- */
+var MW_TYPES = ['text', 'epochs', 'works', 'points', 'kv', 'pair', 'image'];
+var MW_HINTS = {
+  text: 'Rispondi con {"text":"..."}: un testo continuo, ben strutturato.',
+  epochs: 'Rispondi con {"chapters":[{"era":"...","text":"..."}]}: capitoli in ordine cronologico, autori reali.',
+  works: 'Rispondi con {"works":[{"title":"...","artist":"...","date":"...","museum":"...","caption":"..."}]}: solo opere reali.',
+  points: 'Rispondi con {"items":[{"title":"...","text":"..."}]}: voci numerate, una tesi per voce.',
+  kv: 'Rispondi con {"entries":[{"label":"...","value":"..."}]}: coppie etichetta/valore.',
+  pair: 'Rispondi con {"a":{"title":"...","text":"..."},"b":{"title":"...","text":"..."}}: due lati affiancati.',
+  image: 'Nessun testo da generare: verrà usata un’immagine caricata.'
+};
+var MW_RULES = 'Italiano chiaro e didattico. Solo fatti ragionevolmente certi, mai inventare opere/date/citazioni. Rispondi SOLO con JSON valido nella forma dello schema della sezione.';
+function MateriaWizardView() {
+  this.mode = 'new'; // 'new' | 'edit-model'
+  this.step = 1;
+  this.materia = { id: '', nome: '', descrizione: '', systemPrompt: '' };
+  this.modelli = []; // [{key,nome,fromTemplate,systemPrompt,sections:[{key,title,type,required,prompt,system,maxWords}]}]
+  this.editModelId = null;
+  this.editHasCards = false;
+  this.editOrig = null; // {nome, sections} baseline per il diff
+  this.preview = null; // "mi:si" anteprima aperta
+  this.busy = false;
+}
+var materiaWizard = null;
+function mwSlug(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+}
+function mwBlankSection(type) {
+  return { key: '', title: '', type: type || 'text', required: false, prompt: '', system: '', maxWords: '' };
+}
+function mwAllModels() {
+  var out = [];
+  Object.keys(state.modelliPerMateria || {}).forEach(function (mid) {
+    (state.modelliPerMateria[mid] || []).forEach(function (m) { out.push(m); });
+  });
+  return out;
+}
+function editModelWizard(modelloId) {
+  materiaWizard = new MateriaWizardView();
+  materiaWizard.mode = 'edit-model';
+  materiaWizard.editModelId = modelloId;
+  state.view = 'materia-wizard';
+  render();
+  var matId = String(modelloId).split(':')[0];
+  Promise.all([
+    api('/api/models?subject=' + encodeURIComponent(matId)),
+    api('/api/cards?modello=' + encodeURIComponent(modelloId)),
+    api('/api/materie')
+  ]).then(function (rs) {
+    var found = (rs[0].models || []).find(function (m) { return m.id === modelloId; });
+    if (!found) { toast('Modello non trovato'); state.view = 'home'; refreshList(); return; }
+    var w = materiaWizard;
+    w.materia = (rs[2].materie || []).find(function (m) { return m.id === matId; }) || { id: matId, nome: matId, descrizione: '', systemPrompt: '' };
+    w.modelli = [{
+      key: found.chiave, nome: found.nome, fromTemplate: '',
+      systemPrompt: (found.schema && found.schema.system_prompt) || '',
+      sections: JSON.parse(JSON.stringify((found.schema && found.schema.sections) || []))
+    }];
+    w.editOrig = { nome: found.nome, sections: JSON.parse(JSON.stringify((found.schema && found.schema.sections) || [])) };
+    w.editHasCards = ((rs[1] && rs[1].cards) || []).length > 0;
+    w.step = 3;
+    render();
+  }).catch(function (e) { toast(e.message); });
+}
+// specchio client di validateModel/checkSectionDefs per il feedback immediato
+function mwValidate(w) {
+  var errs = [];
+  if (w.mode === 'new') {
+    if (!w.materia.nome.trim()) errs.push('Passo 1: nome materia obbligatorio');
+    var mid = w.materia.id.trim() || mwSlug(w.materia.nome);
+    if (!mid) errs.push('Passo 1: id materia non valido');
+    if (!w.modelli.length) errs.push('Passo 2: aggiungi almeno un modello');
+  }
+  w.modelli.forEach(function (m, mi) {
+    var label = 'Modello ' + (mi + 1);
+    if (!m.nome.trim()) errs.push(label + ': nome obbligatorio');
+    if (w.mode === 'new' && !m.key.trim()) errs.push(label + ': chiave obbligatoria');
+    if (!m.sections.length) errs.push(label + ' (' + (m.nome || m.key || '?') + '): almeno una sezione');
+    var seen = {};
+    m.sections.forEach(function (s, si) {
+      var where = label + ' · sezione ' + (si + 1);
+      if (!s.key.trim()) errs.push(where + ': key mancante');
+      else if (seen[s.key]) errs.push(where + ': key duplicata "' + s.key + '"');
+      else seen[s.key] = true;
+      if (!s.title.trim()) errs.push(where + ': title mancante');
+      if (MW_TYPES.indexOf(s.type) < 0) errs.push(where + ': type sconosciuto');
+      if (s.maxWords !== '' && s.maxWords !== undefined && s.maxWords !== null && (!Number.isInteger(Number(s.maxWords)) || Number(s.maxWords) < 1)) errs.push(where + ': maxWords non valido');
+    });
+  });
+  return errs;
+}
+function mwPreviewText(w, mi, si) {
+  var m = w.modelli[mi], d = m.sections[si];
+  var tone = (w.materia.systemPrompt || '').trim() || ('Sei un educatore italiano della materia "' + (w.materia.nome || w.materia.id) + '".');
+  var bits = ['— SYSTEM (contratto stabile, non si ripete nel task) —', tone];
+  if ((m.systemPrompt || '').trim()) bits.push(m.systemPrompt.trim());
+  if ((d.system || '').trim()) bits.push(d.system.trim());
+  if (MW_HINTS[d.type]) bits.push(MW_HINTS[d.type]);
+  bits.push(MW_RULES);
+  bits.push('', '— USER (task della sezione) —');
+  bits.push('Modello: ' + (m.nome || m.key) + '. Sezione: ' + (d.title || d.key) + ' [' + d.type + '].');
+  if ((d.prompt || '').trim()) bits.push(d.prompt.trim());
+  if (d.maxWords !== '' && d.maxWords !== undefined && d.maxWords !== null) bits.push('Lunghezza vincolante: max ' + d.maxWords + ' parole.');
+  return bits.join('\n');
+}
+function mwStepsNav(w) {
+  var labels = w.mode === 'new' ? ['1 · Materia', '2 · Modelli', '3 · Sezioni e prompt', '4 · Revisione'] : ['3 · Sezioni e prompt', '4 · Revisione'];
+  var steps = w.mode === 'new' ? [1, 2, 3, 4] : [3, 4];
+  var html = '<div class="wiz-steps">';
+  steps.forEach(function (n, i) {
+    var cls = n === w.step ? 'on' : (n < w.step ? 'done' : '');
+    html += '<div class="wiz-step ' + cls + '">' + esc(labels[i]) + '</div>';
+  });
+  return html + '</div>';
+}
+function renderMateriaWizard() {
+  var w = materiaWizard;
+  if (!w) { w = materiaWizard = new MateriaWizardView(); }
+  var isEdit = w.mode === 'edit-model';
+  var html = topbar('', '<button class="btn small" data-nav="home">← Elenco</button>');
+  html += '<h1 class="page-title">' + (isEdit ? 'Prompt del modello' : 'Nuova materia') + '</h1>';
+  html += '<p class="lead">' + (isEdit
+    ? 'Modifica sezioni e prompt: con schede esistenti verrà creata una nuova versione (le pronte restano intatte).'
+    : 'Materia → modelli (da template o vuoti) → sezioni con prompt → revisione. I prompt vivono nel database, versionati col modello.') + '</p>';
+  if (isEdit && w.editHasCards) html += '<p class="step-note"><strong>Questo modello ha schede:</strong> il salvataggio crea una nuova versione, le schede esistenti restano sulla vecchia.</p>';
+  html += mwStepsNav(w);
+  if (w.step === 1) html += mwStepMateria(w);
+  else if (w.step === 2) html += mwStepModelli(w);
+  else if (w.step === 3) html += mwStepSezioni(w);
+  else html += mwStepReview(w);
+  var canBack = isEdit ? w.step > 3 : w.step > 1;
+  var canNext = isEdit ? w.step < 4 : w.step < 4;
+  html += '<div style="display:flex;gap:10px;justify-content:space-between;margin-top:20px;flex-wrap:wrap">' +
+    '<div>' + (canBack ? '<button class="btn" id="mwBack">← Indietro</button>' : '') + '</div><div style="display:flex;gap:10px">';
+  if (canNext) html += '<button class="btn primary" id="mwNext">Avanti →</button>';
+  else html += '<button class="btn green" id="mwSave" style="padding:14px 22px"' + (w.busy ? ' disabled' : '') + '>' + (w.busy ? 'Salvataggio…' : (isEdit ? '💾 Salva (nuova versione se serve)' : '✨ Crea tutto')) + '</button>';
+  html += '</div></div>';
+  appEl.innerHTML = html;
+  bindMateriaWizard(w);
+}
+function mwStepMateria(w) {
+  if (w.mode === 'edit-model') {
+    return '<div class="card"><div class="step-head"><span class="eyebrow">Materia (fissa)</span></div>' +
+      '<p><strong>' + esc(w.materia.nome || w.materia.id) + '</strong> <span class="step-note">' + esc(w.materia.id) + '</span></p>' +
+      '<p class="step-note">Tono: ' + esc((w.materia.systemPrompt || '').slice(0, 160) || 'default') + '</p></div>';
+  }
+  return '<div class="card"><div class="step-head"><span class="eyebrow">Passo 1 · Materia</span></div><div class="meta-grid">' +
+    '<div class="field"><label>Nome *</label><input id="mwMatNome" value="' + esc(w.materia.nome) + '" placeholder="es. Storia della musica" /></div>' +
+    '<div class="field"><label>Id (auto dallo nome se vuoto)</label><input id="mwMatId" value="' + esc(w.materia.id) + '" placeholder="es. musica" /></div>' +
+    '</div><div class="field"><label>Descrizione</label><textarea id="mwMatDesc" placeholder="A cosa serve questa materia">' + esc(w.materia.descrizione) + '</textarea></div>' +
+    '<div class="field"><label>Tono / system prompt di materia (opzionale: default educatore italiano)</label><textarea id="mwMatSys" style="min-height:80px" placeholder="es. Sei uno storico della musica...">' + esc(w.materia.systemPrompt) + '</textarea></div></div>';
+}
+function mwStepModelli(w) {
+  var html = '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">Passo 2 · Modelli</span>';
+  if (w.mode === 'new') {
+    var arch = mwAllModels();
+    html += '<span style="display:flex;gap:8px;align-items:center"><select id="mwTpl">' +
+      '<option value="">vuoto…</option>' +
+      arch.map(function (m) {
+        var sid = m.id || '';
+        return '<option value="' + esc(sid) + '">clona: ' + esc((m.materiaId || '') + ' · ' + (m.nome || m.chiave)) + '</option>';
+      }).join('') + '</select>' +
+      '<button class="btn small" id="mwAddBlank">+ Vuoto</button>' +
+      '<button class="btn small" id="mwAddTpl">+ Clona</button></span>';
+  }
+  html += '</div><div id="mwModels">';
+  if (!w.modelli.length) html += '<p class="step-note">Nessun modello: aggiungine uno vuoto o clonato da un archetipo.</p>';
+  w.modelli.forEach(function (m, mi) {
+    html += '<div class="card" style="background:var(--paper)"><div class="step-head"><strong>' + esc(m.nome || m.key || ('Modello ' + (mi + 1))) + '</strong>' +
+      (w.mode === 'new' ? '<button class="btn small ghost" data-mw-mdel="' + mi + '">✕ Rimuovi</button>' : '<span class="step-note">chiave fissa: ' + esc(m.key) + '</span>') + '</div>' +
+      '<div class="meta-grid">' +
+      '<div class="field"><label>Nome *</label><input data-mw-m="' + mi + ':nome" value="' + esc(m.nome) + '" placeholder="es. Il compositore" /></div>' +
+      (w.mode === 'new' ? '<div class="field"><label>Chiave *</label><input data-mw-m="' + mi + ':key" value="' + esc(m.key) + '" placeholder="es. compositore" /></div>' : '') +
+      '</div>' +
+      '<div class="field"><label>Voce del modello / system prompt (opzionale, eredita il tono)</label><textarea data-mw-m="' + mi + ':systemPrompt" style="min-height:56px" placeholder="es. Voce monografica, 3-5 nuclei...">' + esc(m.systemPrompt || '') + '</textarea></div>' +
+      '<p class="step-note">' + m.sections.length + ' sezioni' + (m.fromTemplate ? ' · da template' : '') + '</p></div>';
+  });
+  return html + '</div></div>';
+}
+function mwStepSezioni(w) {
+  var html = '';
+  w.modelli.forEach(function (m, mi) {
+    html += '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">Modello: ' + esc(m.nome || m.key || ('#' + (mi + 1))) + '</span>' +
+      '<span style="display:flex;gap:8px;align-items:center"><select id="mwAddType-' + mi + '">' +
+      MW_TYPES.map(function (t) { return '<option value="' + t + '">' + t + '</option>'; }).join('') + '</select>' +
+      '<button class="btn small" data-mw-addsec="' + mi + '">➕ Sezione</button></span></div><div>';
+    if (!m.sections.length) html += '<p class="step-note">Nessuna sezione: aggiungine dalla libreria dei 7 tipi.</p>';
+    m.sections.forEach(function (d, si) {
+      var prevKey = 'mwPrev-' + mi + '-' + si;
+      html += '<div class="card" style="background:var(--paper);margin-bottom:10px"><div class="meta-grid">' +
+        '<div class="field"><label>Key *</label><input data-mw-s="' + mi + ':' + si + ':key" value="' + esc(d.key) + '" placeholder="es. vita" /></div>' +
+        '<div class="field"><label>Titolo *</label><input data-mw-s="' + mi + ':' + si + ':title" value="' + esc(d.title) + '" placeholder="es. Vita e contesto" /></div>' +
+        '<div class="field"><label>Tipo</label><select data-mw-s="' + mi + ':' + si + ':type">' +
+        MW_TYPES.map(function (t) { return '<option value="' + t + '"' + (t === d.type ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></div>' +
+        '<div class="field"><label>Max parole</label><input data-mw-s="' + mi + ':' + si + ':maxWords" value="' + esc(d.maxWords === undefined || d.maxWords === null ? '' : d.maxWords) + '" placeholder="—" inputmode="numeric" /></div>' +
+        '</div>' +
+        '<div class="field"><label class="check-item" style="border:0;padding:0;background:none"><input type="checkbox" data-mw-s="' + mi + ':' + si + ':required"' + (d.required ? ' checked' : '') + ' /> <span><strong>Obbligatoria</strong> <small>blocca l’approva se vuota</small></span></label></div>' +
+        '<div class="field"><label>Prompt task (user) — cosa generare</label><textarea data-mw-s="' + mi + ':' + si + ':prompt" style="min-height:64px" placeholder="Istruzioni specifiche della sezione…">' + esc(d.prompt || '') + '</textarea></div>' +
+        '<div class="field"><label>System override (opzionale: eredita tono + voce)</label><textarea data-mw-s="' + mi + ':' + si + ':system" style="min-height:44px" placeholder="Solo vincoli extra di questa sezione…">' + esc(d.system || '') + '</textarea></div>' +
+        '<div style="display:flex;gap:8px"><button class="btn small" data-mw-prev="' + mi + ':' + si + '">👁 Anteprima prompt</button>' +
+        '<button class="btn small ghost" data-mw-sdel="' + mi + ':' + si + '">✕ Rimuovi</button></div>' +
+        '<pre id="' + prevKey + '" style="display:none;white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px"></pre>' +
+        '</div>';
+    });
+    html += '</div></div>';
+  });
+  return html;
+}
+function mwStepReview(w) {
+  var errs = mwValidate(w);
+  var html = '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">Passo 4 · Revisione</span></div>';
+  if (w.mode === 'new') {
+    var mid = w.materia.id.trim() || mwSlug(w.materia.nome);
+    html += '<p><strong>Materia:</strong> ' + esc(w.materia.nome || '—') + ' <span class="step-note">(' + esc(mid) + ')</span></p>';
+  } else {
+    html += '<p><strong>Materia:</strong> ' + esc(w.materia.nome || w.materia.id) + '</p>';
+    if (w.editHasCards) html += '<p class="step-note">⚠ Il modello ha schede: verrà creata una <strong>nuova versione</strong>, le pronte restano intatte.</p>';
+  }
+  html += '<ul>' + w.modelli.map(function (m) {
+    return '<li><strong>' + esc(m.nome || m.key) + '</strong> <span class="step-note">(' + esc(m.key) + ')</span> — ' + m.sections.length + ' sezioni, ' +
+      m.sections.filter(function (s) { return s.required; }).length + ' obbligatorie</li>';
+  }).join('') + '</ul>';
+  if (errs.length) html += '<div class="overview-card overview-error" style="margin-top:10px"><h3>Da sistemare (' + errs.length + ')</h3><ul>' + errs.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+  else html += '<p class="step-note">Tutto valido. ' + (w.mode === 'new' ? 'La creazione scrive materia → modelli → sezioni in ordine.' : 'Il salvataggio applica il diff (aggiunte/modifiche/rimozioni).') + '</p>';
+  return html + '</div>';
+}
+function bindMateriaWizard(w) {
+  var back = document.getElementById('mwBack');
+  if (back) back.onclick = function () {
+    if (w.mode === 'edit-model' && w.step <= 3) { state.view = 'home'; refreshList(); return; }
+    w.step = Math.max(w.mode === 'edit-model' ? 3 : 1, w.step - 1);
+    render();
+  };
+  var next = document.getElementById('mwNext');
+  if (next) next.onclick = function () { w.step = Math.min(4, w.step + 1); render(); };
+  var save = document.getElementById('mwSave');
+  if (save) save.onclick = function () { mwSave(w); };
+  // step 1
+  [['mwMatNome', 'nome'], ['mwMatId', 'id'], ['mwMatDesc', 'descrizione'], ['mwMatSys', 'systemPrompt']].forEach(function (p) {
+    var el = document.getElementById(p[0]);
+    if (el) el.oninput = function () { w.materia[p[1]] = el.value; };
+  });
+  // step 2: modelli
+  appEl.querySelectorAll('[data-mw-m]').forEach(function (inp) {
+    var parts = inp.getAttribute('data-mw-m').split(':');
+    inp.oninput = function () { w.modelli[Number(parts[0])][parts[1]] = inp.value; };
+  });
+  appEl.querySelectorAll('[data-mw-mdel]').forEach(function (b) {
+    b.onclick = function () { w.modelli.splice(Number(b.getAttribute('data-mw-mdel')), 1); render(); };
+  });
+  var addB = document.getElementById('mwAddBlank');
+  if (addB) addB.onclick = function () { w.modelli.push({ key: '', nome: '', fromTemplate: '', systemPrompt: '', sections: [] }); render(); };
+  var addT = document.getElementById('mwAddTpl');
+  if (addT) addT.onclick = function () {
+    var sel = document.getElementById('mwTpl');
+    var tplId = sel && sel.value;
+    if (!tplId) { toast('Scegli un template da clonare (oppure Vuoto)'); return; }
+    var matId = tplId.split(':')[0];
+    api('/api/models?subject=' + encodeURIComponent(matId)).then(function (r) {
+      var tpl = (r.models || []).find(function (m) { return m.id === tplId; });
+      if (!tpl) { toast('Template non trovato'); return; }
+      var cloned = JSON.parse(JSON.stringify((tpl.schema && tpl.schema.sections) || []));
+      w.modelli.push({ key: '', nome: '', fromTemplate: tplId, systemPrompt: (tpl.schema && tpl.schema.system_prompt) || '', sections: cloned, _tplSections: JSON.parse(JSON.stringify(cloned)) });
+      render();
+    }).catch(function (e) { toast(e.message); });
+  };
+  // step 3: sezioni
+  appEl.querySelectorAll('[data-mw-s]').forEach(function (inp) {
+    var parts = inp.getAttribute('data-mw-s').split(':');
+    var mi = Number(parts[0]), si = Number(parts[1]), field = parts[2];
+    var handler = function () {
+      var d = w.modelli[mi].sections[si];
+      if (!d) return;
+      if (field === 'required') d.required = inp.checked;
+      else d[field] = inp.value;
+    };
+    inp.oninput = handler;
+    inp.onchange = handler;
+  });
+  appEl.querySelectorAll('[data-mw-sdel]').forEach(function (b) {
+    b.onclick = function () {
+      var parts = b.getAttribute('data-mw-sdel').split(':');
+      w.modelli[Number(parts[0])].sections.splice(Number(parts[1]), 1);
+      render();
+    };
+  });
+  appEl.querySelectorAll('[data-mw-addsec]').forEach(function (b) {
+    b.onclick = function () {
+      var mi = Number(b.getAttribute('data-mw-addsec'));
+      var sel = document.getElementById('mwAddType-' + mi);
+      w.modelli[mi].sections.push(mwBlankSection(sel ? sel.value : 'text'));
+      render();
+    };
+  });
+  appEl.querySelectorAll('[data-mw-prev]').forEach(function (b) {
+    b.onclick = function () {
+      var parts = b.getAttribute('data-mw-prev').split(':');
+      var el = document.getElementById('mwPrev-' + parts[0] + '-' + parts[1]);
+      if (!el) return;
+      if (el.style.display === 'none') { el.textContent = mwPreviewText(w, Number(parts[0]), Number(parts[1])); el.style.display = 'block'; }
+      else el.style.display = 'none';
+    };
+  });
+}
+function mwSave(w) {
+  var errs = mwValidate(w);
+  if (errs.length) { w.step = 4; render(); toast('Sistema prima gli errori (' + errs.length + ')'); return; }
+  w.busy = true;
+  render();
+  var done = function (msg) {
+    w.busy = false;
+    toast(msg, true);
+    state.view = 'home';
+    refreshList();
+  };
+  var fail = function (e) { w.busy = false; render(); toast((e && e.message) || e); };
+  if (w.mode === 'new') {
+    var mid = w.materia.id.trim() || mwSlug(w.materia.nome);
+    var savedMid = mid;
+    var secBody = function (d) {
+      var o = { key: d.key.trim(), title: d.title.trim(), type: d.type, required: !!d.required };
+      if ((d.prompt || '').trim()) o.prompt = d.prompt;
+      if ((d.system || '').trim()) o.system = d.system;
+      if (d.maxWords !== '' && d.maxWords !== undefined && d.maxWords !== null) o.maxWords = Number(d.maxWords);
+      return o;
+    };
+    post('/api/materie', { id: mid, nome: w.materia.nome.trim(), descrizione: w.materia.descrizione, systemPrompt: w.materia.systemPrompt })
+      .then(function (r) {
+        savedMid = (r.materia && r.materia.id) || mid;
+        var chain = Promise.resolve();
+        w.modelli.forEach(function (m) {
+          chain = chain.then(function () {
+            var body = { materiaId: savedMid, chiave: m.key.trim(), nome: m.nome.trim() };
+            var secs = m.sections.map(secBody);
+            var pureClone = m.fromTemplate && m._tplSections && JSON.stringify(secs) === JSON.stringify(m._tplSections.map(secBody));
+            if (pureClone) body.fromTemplate = m.fromTemplate;
+            else body.sections = secs;
+            return post('/api/models', body).then(function (r2) {
+              var vp = (m.systemPrompt || '').trim();
+              if (!vp) return r2;
+              return patch('/api/models/' + encodeURIComponent(r2.model.id), { systemPrompt: vp }).then(function () { return r2; });
+            });
+          });
+        });
+        return chain;
+      })
+      .then(function () { done('Materia creata: rivedila in home, le schede partono da “Nuova scheda per materia”'); })
+      .catch(fail);
+  } else {
+    // edit-model: fork se ha schede, poi diff sezioni + nome
+    var start = Promise.resolve(w.editModelId);
+    if (w.editHasCards) {
+      start = post('/api/models/' + encodeURIComponent(w.editModelId) + '/fork', {}).then(function (r) { return r.model.id; });
+    }
+    start.then(function (targetId) {
+      var m = w.modelli[0];
+      var chain = Promise.resolve();
+      if (m.nome.trim() !== (w.editOrig.nome || '')) {
+        chain = chain.then(function () { return patch('/api/models/' + encodeURIComponent(targetId), { nome: m.nome.trim() }); });
+      }
+      var vp = (m.systemPrompt || '').trim();
+      if (vp) {
+        chain = chain.then(function () { return patch('/api/models/' + encodeURIComponent(targetId), { systemPrompt: vp }); });
+      }
+      var orig = w.editOrig.sections || [];
+      var origByKey = {};
+      orig.forEach(function (d) { origByKey[d.key] = d; });
+      var editedByKey = {};
+      m.sections.forEach(function (d) { editedByKey[d.key] = d; });
+      orig.forEach(function (d) {
+        if (!editedByKey[d.key]) chain = chain.then(function () { return del('/api/models/' + encodeURIComponent(targetId) + '/sections/' + encodeURIComponent(d.key)); });
+      });
+      m.sections.forEach(function (d) {
+        var o = origByKey[d.key];
+        var body = stripSec(d);
+        if (!o) chain = chain.then(function () { return post('/api/models/' + encodeURIComponent(targetId) + '/sections', body); });
+        else if (JSON.stringify(stripSec(o)) !== JSON.stringify(body)) {
+          chain = chain.then(function () { return patch('/api/models/' + encodeURIComponent(targetId) + '/sections/' + encodeURIComponent(d.key), body); });
+        }
+      });
+      return chain.then(function () { return targetId; });
+    })
+      .then(function (targetId) { done(w.editHasCards ? 'Nuova versione creata (' + targetId + ')' : 'Modello aggiornato'); })
+      .catch(fail);
+  }
+}
+function stripSec(d) {
+  return { key: d.key, title: d.title, type: d.type, required: !!d.required, prompt: d.prompt || '', system: d.system || '', maxWords: (d.maxWords === undefined || d.maxWords === null || d.maxWords === '') ? undefined : Number(d.maxWords) };
 }
 
 /* ---------- home actions ---------- */

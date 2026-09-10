@@ -224,6 +224,7 @@ export function initSchema() {
       nome TEXT NOT NULL DEFAULT '',
       descrizione TEXT NOT NULL DEFAULT '',
       stato TEXT NOT NULL DEFAULT 'attiva',
+      system_prompt TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS modelli_scheda (
@@ -241,6 +242,7 @@ export function initSchema() {
       modello_id TEXT NOT NULL REFERENCES modelli_scheda(id) ON DELETE CASCADE,
       titolo TEXT NOT NULL DEFAULT '',
       stato TEXT NOT NULL DEFAULT 'draft' CHECK (stato IN ('draft','ready')),
+      sezioni_attive TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -251,6 +253,8 @@ export function initSchema() {
       titolo TEXT NOT NULL DEFAULT '',
       corpo_json TEXT NOT NULL DEFAULT '{}',
       ordine INTEGER NOT NULL DEFAULT 0,
+      model TEXT NOT NULL DEFAULT '',
+      prompt_version TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(scheda_id, chiave)
     );
@@ -279,6 +283,15 @@ export function initSchema() {
   // migrazione: sezione "Tecnica e materia" (tab Approfondimento) sulle schede dei dettagli
   const dcols = getDb().prepare('PRAGMA table_info(detail_content)').all().map(c => c.name);
   if (!dcols.includes('technique')) db.exec("ALTER TABLE detail_content ADD COLUMN technique TEXT NOT NULL DEFAULT ''");
+
+  // migrazione: prompt-database + wizard (system_prompt, sezioni_attive, timbri)
+  const mcols = getDb().prepare('PRAGMA table_info(materie)').all().map(c => c.name);
+  if (!mcols.includes('system_prompt')) db.exec("ALTER TABLE materie ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''");
+  const scols = getDb().prepare('PRAGMA table_info(schede_lezione)').all().map(c => c.name);
+  if (!scols.includes('sezioni_attive')) db.exec("ALTER TABLE schede_lezione ADD COLUMN sezioni_attive TEXT NOT NULL DEFAULT ''");
+  const zcols = getDb().prepare('PRAGMA table_info(sezioni)').all().map(c => c.name);
+  if (!zcols.includes('model')) db.exec("ALTER TABLE sezioni ADD COLUMN model TEXT NOT NULL DEFAULT ''");
+  if (!zcols.includes('prompt_version')) db.exec("ALTER TABLE sezioni ADD COLUMN prompt_version TEXT NOT NULL DEFAULT ''");
 
   // backfill: opere esistenti (solo file su disco) -> carica il BLOB una tantum
   const missing = getDb().prepare("SELECT id, image_path FROM artworks WHERE image_data IS NULL AND image_path != ''").all();
@@ -821,7 +834,7 @@ export function publishArtwork(id) {
 // ---------------------------------------------------------------------------
 function rowToMateria(row) {
   if (!row) return null;
-  return { id: row.id, nome: row.nome, descrizione: row.descrizione, stato: row.stato, createdAt: row.created_at };
+  return { id: row.id, nome: row.nome, descrizione: row.descrizione, stato: row.stato, systemPrompt: row.system_prompt || '', createdAt: row.created_at };
 }
 function rowToModello(row) {
   if (!row) return null;
@@ -831,15 +844,41 @@ function rowToModello(row) {
 }
 function rowToScheda(row) {
   if (!row) return null;
-  return { id: row.id, modelloId: row.modello_id, titolo: row.titolo, stato: row.stato, createdAt: row.created_at, updatedAt: row.updated_at };
+  let attive = null;
+  try { const v = JSON.parse(row.sezioni_attive || 'null'); if (Array.isArray(v)) attive = v; } catch { attive = null; }
+  return { id: row.id, modelloId: row.modello_id, titolo: row.titolo, stato: row.stato, sezioniAttive: attive, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+function encodeAttive(v) {
+  if (v === undefined || v === null) return null; // null = non toccare / tutte
+  if (!Array.isArray(v)) throw new Error('sezioniAttive deve essere un array di chiavi');
+  return JSON.stringify(v.map(String));
 }
 
-export function upsertMateria({ id, nome, descrizione = '', stato = 'attiva' }) {
+export function upsertMateria({ id, nome, descrizione = '', stato = 'attiva', systemPrompt = '' }) {
   if (!String(id || '').trim()) throw new Error('materia.id obbligatorio');
-  getDb().prepare(`INSERT INTO materie (id, nome, descrizione, stato) VALUES (?, ?, ?, ?)
+  // Il system_prompt si imposta solo all'inserimento: il seed a ogni avvio non
+  // deve mai sovrascrivere il tono personalizzato dall'utente (PATCH lo aggiorna).
+  getDb().prepare(`INSERT INTO materie (id, nome, descrizione, stato, system_prompt) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, descrizione=excluded.descrizione, stato=excluded.stato`)
-    .run(id, nome || '', descrizione || '', stato || 'attiva');
+    .run(id, nome || '', descrizione || '', stato || 'attiva', systemPrompt || '');
   return getMateria(id);
+}
+export function updateMateria(id, patch = {}) {
+  const current = getMateria(id);
+  if (!current) return null;
+  const merged = {
+    nome: patch.nome !== undefined ? String(patch.nome) : current.nome,
+    descrizione: patch.descrizione !== undefined ? String(patch.descrizione) : current.descrizione,
+    stato: patch.stato !== undefined ? String(patch.stato) : current.stato,
+    systemPrompt: patch.systemPrompt !== undefined ? String(patch.systemPrompt) : current.systemPrompt,
+  };
+  if (!merged.nome.trim()) throw new Error('materia.nome obbligatorio');
+  getDb().prepare('UPDATE materie SET nome = ?, descrizione = ?, stato = ?, system_prompt = ? WHERE id = ?')
+    .run(merged.nome, merged.descrizione, merged.stato, merged.systemPrompt, id);
+  return getMateria(id);
+}
+export function deleteMateria(id) {
+  getDb().prepare('DELETE FROM materie WHERE id = ?').run(id);
 }
 export function getMateria(id, conn) {
   const row = (conn || getDb()).prepare('SELECT * FROM materie WHERE id = ?').get(id);
@@ -866,6 +905,20 @@ export function getModello(id, conn) {
   const row = (conn || getDb()).prepare('SELECT * FROM modelli_scheda WHERE id = ?').get(id);
   return rowToModello(row);
 }
+export function updateModello(id, { nome, schema } = {}) {
+  const current = getModello(id);
+  if (!current) return null;
+  getDb().prepare('UPDATE modelli_scheda SET nome = ?, schema_json = ? WHERE id = ?')
+    .run(nome !== undefined ? String(nome) : current.nome, JSON.stringify(schema !== undefined ? schema : current.schema), id);
+  return getModello(id);
+}
+export function deleteModello(id) {
+  getDb().prepare('DELETE FROM modelli_scheda WHERE id = ?').run(id);
+}
+export function modelHasCards(modelloId, conn) {
+  const row = (conn || getDb()).prepare('SELECT COUNT(*) AS c FROM schede_lezione WHERE modello_id = ?').get(modelloId);
+  return (row?.c || 0) > 0;
+}
 export function listModelli(materiaId, conn) {
   if (materiaId) return (conn || getDb()).prepare('SELECT * FROM modelli_scheda WHERE materia_id = ? ORDER BY chiave, versione').all(materiaId).map(rowToModello);
   return (conn || getDb()).prepare('SELECT * FROM modelli_scheda ORDER BY materia_id, chiave, versione').all().map(rowToModello);
@@ -873,21 +926,23 @@ export function listModelli(materiaId, conn) {
 
 // Popola il nucleo dal registry dichiarativo (core/models.mjs): idempotente.
 // Accetta { materie: [...], modelli: [...] } per restare iniettabile nei test.
+// Il system_prompt si imposta solo alla prima creazione (vedi upsertMateria).
 export function seedCore({ materie = [], modelli = [] } = {}) {
-  for (const m of materie) upsertMateria({ id: m.id, nome: m.nome, descrizione: m.descrizione || '', stato: m.stato || 'attiva' });
+  for (const m of materie) upsertMateria({ id: m.id, nome: m.nome, descrizione: m.descrizione || '', stato: m.stato || 'attiva', systemPrompt: m.systemPrompt || '' });
   for (const mod of modelli) {
     upsertModello({ materiaId: mod.subject, chiave: mod.key, nome: mod.name, versione: mod.version || 1, schema: mod });
   }
   return { materie: listMaterie().length, modelli: listModelli().length };
 }
 
-export function createScheda({ id = null, modelloId, titolo = '' }) {
+export function createScheda({ id = null, modelloId, titolo = '', sezioniAttive = null }) {
   const modello = getModello(modelloId);
   if (!modello) throw new Error(`modello sconosciuto: ${modelloId}`);
   const schedaId = id || ('scheda-' + Date.now().toString(36));
   if (getScheda(schedaId)) throw new Error(`esiste già una scheda con id ${schedaId}`);
-  getDb().prepare(`INSERT INTO schede_lezione (id, modello_id, titolo, stato, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?)`)
-    .run(schedaId, modelloId, titolo || '', now(), now());
+  const att = encodeAttive(sezioniAttive);
+  getDb().prepare(`INSERT INTO schede_lezione (id, modello_id, titolo, stato, sezioni_attive, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?, ?)`)
+    .run(schedaId, modelloId, titolo || '', att === null ? '' : att, now(), now());
   return getScheda(schedaId);
 }
 export function getScheda(id, conn) {
@@ -905,7 +960,15 @@ export function updateScheda(id, patch = {}) {
   const current = getScheda(id);
   if (!current) return null;
   const titolo = patch.titolo !== undefined ? String(patch.titolo) : current.titolo;
-  getDb().prepare('UPDATE schede_lezione SET titolo = ?, updated_at = ? WHERE id = ?').run(titolo, now(), id);
+  let att = null;
+  let attTouched = false;
+  if (patch.sezioniAttive !== undefined) { att = encodeAttive(patch.sezioniAttive); attTouched = true; }
+  if (attTouched) {
+    getDb().prepare('UPDATE schede_lezione SET titolo = ?, sezioni_attive = ?, updated_at = ? WHERE id = ?')
+      .run(titolo, att === null ? '' : att, now(), id);
+  } else {
+    getDb().prepare('UPDATE schede_lezione SET titolo = ?, updated_at = ? WHERE id = ?').run(titolo, now(), id);
+  }
   return getScheda(id);
 }
 export function deleteScheda(id) {
@@ -915,7 +978,11 @@ export function deleteScheda(id) {
 function parseCorpo(text) {
   try { return JSON.parse(text || '{}'); } catch { return {}; }
 }
-export function saveSezione(schedaId, chiave, corpo) {
+function rowToSezione(row) {
+  if (!row) return null;
+  return { id: row.id, schedaId: row.scheda_id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine, model: row.model || '', promptVersion: row.prompt_version || '', updatedAt: row.updated_at };
+}
+export function saveSezione(schedaId, chiave, corpo, meta = {}) {
   const scheda = getScheda(schedaId);
   if (!scheda) throw new Error(`scheda sconosciuta: ${schedaId}`);
   const modello = getModello(scheda.modelloId);
@@ -923,21 +990,22 @@ export function saveSezione(schedaId, chiave, corpo) {
     ? modello.schema.sections.find((s) => s.key === chiave)
     : null;
   if (!def) throw new Error(`sezione sconosciuta per questo modello: ${chiave}`);
+  if (scheda.sezioniAttive && !scheda.sezioniAttive.includes(chiave)) {
+    throw new Error(`sezione non attiva per questa scheda: ${chiave}`);
+  }
   const corpoObj = (corpo && typeof corpo === 'object') ? corpo : parseCorpo(corpo);
   const ordine = Math.max(0, modello.schema.sections.findIndex((s) => s.key === chiave));
-  getDb().prepare(`INSERT INTO sezioni (scheda_id, chiave, titolo, corpo_json, ordine, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(scheda_id, chiave) DO UPDATE SET titolo=excluded.titolo, corpo_json=excluded.corpo_json, ordine=excluded.ordine, updated_at=excluded.updated_at`)
-    .run(schedaId, chiave, def.title || '', JSON.stringify(corpoObj), ordine, now());
+  getDb().prepare(`INSERT INTO sezioni (scheda_id, chiave, titolo, corpo_json, ordine, model, prompt_version, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(scheda_id, chiave) DO UPDATE SET titolo=excluded.titolo, corpo_json=excluded.corpo_json, ordine=excluded.ordine, model=excluded.model, prompt_version=excluded.prompt_version, updated_at=excluded.updated_at`)
+    .run(schedaId, chiave, def.title || '', JSON.stringify(corpoObj), ordine, String(meta.model || ''), String(meta.promptVersion || ''), now());
   return getSezione(schedaId, chiave);
 }
 export function getSezione(schedaId, chiave, conn) {
   const row = (conn || getDb()).prepare('SELECT * FROM sezioni WHERE scheda_id = ? AND chiave = ?').get(schedaId, chiave);
-  if (!row) return null;
-  return { id: row.id, schedaId: row.scheda_id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine, updatedAt: row.updated_at };
+  return rowToSezione(row);
 }
 export function listSezioni(schedaId, conn) {
-  return (conn || getDb()).prepare('SELECT * FROM sezioni WHERE scheda_id = ? ORDER BY ordine, chiave').all(schedaId)
-    .map((row) => ({ id: row.id, schedaId: row.scheda_id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine, updatedAt: row.updated_at }));
+  return (conn || getDb()).prepare('SELECT * FROM sezioni WHERE scheda_id = ? ORDER BY ordine, chiave').all(schedaId).map(rowToSezione);
 }
 
 function corpoVuoto(tipo, corpo, haImmagini) {
@@ -957,14 +1025,18 @@ function corpoVuoto(tipo, corpo, haImmagini) {
 
 // Gate "Genera e salva prima i contenuti": ready solo a sezioni required piene.
 // Ritorna { ok, missing: [chiavi] }; se ok, passa la scheda a ready.
+// Conta solo le required comprese in sezioni_attive (null = tutte).
 export function approveScheda(id) {
   const scheda = getScheda(id);
   if (!scheda) return null;
   const modello = getModello(scheda.modelloId);
   const sections = (modello && Array.isArray(modello.schema.sections)) ? modello.schema.sections : [];
+  const attive = scheda.sezioniAttive;
   const salvate = new Map(listSezioni(id).map((s) => [s.chiave, s.corpo]));
   const nImmagini = getDb().prepare('SELECT COUNT(*) AS c FROM immagini WHERE scheda_id = ?').get(id).c;
-  const missing = sections.filter((s) => s.required).filter((s) => corpoVuoto(s.type, salvate.get(s.key), nImmagini > 0)).map((s) => s.key);
+  const missing = sections
+    .filter((s) => s.required && (!attive || attive.includes(s.key)))
+    .filter((s) => corpoVuoto(s.type, salvate.get(s.key), nImmagini > 0)).map((s) => s.key);
   if (missing.length) return { ok: false, missing };
   getDb().prepare("UPDATE schede_lezione SET stato = 'ready', updated_at = ? WHERE id = ?").run(now(), id);
   return { ok: true, missing: [], scheda: getScheda(id) };
@@ -997,8 +1069,7 @@ export function getSchedaFull(id, conn) {
   const scheda = rowToScheda(db.prepare('SELECT * FROM schede_lezione WHERE id = ?').get(id));
   if (!scheda) return null;
   const modello = rowToModello(db.prepare('SELECT * FROM modelli_scheda WHERE id = ?').get(scheda.modelloId));
-  const sezioni = db.prepare('SELECT * FROM sezioni WHERE scheda_id = ? ORDER BY ordine, chiave').all(id)
-    .map((row) => ({ id: row.id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine }));
+  const sezioni = db.prepare('SELECT * FROM sezioni WHERE scheda_id = ? ORDER BY ordine, chiave').all(id).map(rowToSezione);
   const immaginiMeta = db.prepare('SELECT id, ruolo, mime, length(dati) AS bytes FROM immagini WHERE scheda_id = ? ORDER BY id').all(id);
   return { ...scheda, modello, sezioni, immagini: immaginiMeta };
 }

@@ -4,8 +4,10 @@
 // il viewer/creator generico senza nuovo codice per materia.
 
 export const MATERIE = Object.freeze([
-  { id: 'arte', nome: "Storia dell'arte", descrizione: 'Schede didattiche sulle opere, i soggetti e i confronti.', stato: 'attiva' },
-  { id: 'filosofia', nome: 'Storia della filosofia', descrizione: 'Autori, tematiche e confronti filosofici.', stato: 'attiva' },
+  { id: 'arte', nome: "Storia dell'arte", descrizione: 'Schede didattiche sulle opere, i soggetti e i confronti.', stato: 'attiva',
+    systemPrompt: "Sei uno storico dell'arte e un educatore italiano: preciso su opere, date e attribuzioni, chiaro con gli studenti." },
+  { id: 'filosofia', nome: 'Storia della filosofia', descrizione: 'Autori, tematiche e confronti filosofici.', stato: 'attiva',
+    systemPrompt: 'Sei uno storico della filosofia e un educatore italiano: rigoroso sulle dottrine attestate, chiaro con gli studenti.' },
 ]);
 
 function artModels() {

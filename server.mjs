@@ -365,8 +365,11 @@ async function acquireRateSlot() {
 // Timeout per singola chiamata: senza, un socket appeso blocca la pipeline per sempre.
 // Lo scadere abortisce la fetch -> errore -> backoff + retry nel ciclo sotto.
 const MODEL_TIMEOUT_MS = Math.max(10000, Number(process.env.OPENROUTER_TIMEOUT_MS || 120000));
-export async function callModel(model, content, apiKey, fetchImpl = globalThis.fetch) {
-  const body = { model, messages: [{ role: 'user', content }], temperature: 0.2, top_p: 0.7, max_tokens: 8000, stream: false };
+export async function callModel(model, content, apiKey, fetchImpl = globalThis.fetch, opts = {}) {
+  const messages = opts.system
+    ? [{ role: 'system', content: opts.system }, { role: 'user', content }]
+    : [{ role: 'user', content }];
+  const body = { model, messages, temperature: 0.2, top_p: 0.7, max_tokens: 8000, stream: false };
   if (webSearchEnabled()) body.plugins = [{ id: 'web', max_results: 5 }];
   const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json', 'HTTP-Referer': 'http://127.0.0.1:18000', 'X-Title': 'Leggi l Opera d Arte' };
   let response = null;
@@ -512,13 +515,20 @@ function catalogScheda(s) {
 function dbSchedaPayload(id) {
   const full = getSchedaFullRO(id);
   if (!full || full.stato !== 'ready') return null;
+  // Il viewer mostra solo le sezioni attive della scheda (null = tutte).
+  const att = full.sezioniAttive;
+  const sezioni = att ? (full.sezioni || []).filter((s) => att.includes(s.chiave)) : (full.sezioni || []);
+  const modello = full.modello ? {
+    ...full.modello,
+    schema: { ...(full.modello.schema || {}), sections: ((full.modello.schema || {}).sections || []).filter((d) => !att || att.includes(d.key)) },
+  } : full.modello;
   return {
     cardType: 'scheda',
     id: full.id,
     titolo: full.titolo,
     stato: full.stato,
-    modello: full.modello,
-    sezioni: full.sezioni,
+    modello,
+    sezioni,
     immagini: (full.immagini || []).map((m) => ({ ...m, url: '/api/cards/' + full.id + '/images/' + m.id }))
   };
 }

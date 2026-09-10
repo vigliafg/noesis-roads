@@ -21,7 +21,8 @@ import {
   setComparisonSide, listComparisonSides, getComparisonSide, getComparisonSideImage, getComparisonThumb,
   replaceComparisonPoints, listComparisonPoints, getFullComparison,
   // Nucleo generico (Fase 2): materie / modelli / schede-lezione / sezioni / immagini
-  listMaterie, listModelli, getModello, seedCore, createScheda, getScheda, getSchedaFull,
+  listMaterie, getMateria, upsertMateria, updateMateria, deleteMateria, listModelli, getModello,
+  upsertModello, updateModello, deleteModello, modelHasCards, seedCore, createScheda, getScheda, getSchedaFull,
   listSchede, updateScheda, deleteScheda, saveSezione, getSezione, approveScheda,
   addImmagine, listImmagini, getImmagine, deleteImmagine
 } from './db.mjs';
@@ -29,8 +30,9 @@ import { callModel, VISION_MODEL, TEXT_MODEL, getOpenRouterApiKey,
   buildVisionPrompt, buildOverviewPrompt, buildTextPrompt, buildSimilarPrompt,
   normalizeAnalysis, normalizeOverview, normalizeSimilar, resolveSimilarImages } from '../server.mjs';
 import { listMaterie as materieRegistry, listModelli as modelliRegistry } from '../core/models.mjs';
-import { validateBody, isBodyEmpty } from '../core/sectionTypes.mjs';
-import { buildSectionPrompt } from '../core/prompts.mjs';
+import { validateBody, isBodyEmpty, isKnownSectionType } from '../core/sectionTypes.mjs';
+import { validateModel } from '../core/modelSpec.mjs';
+import { assembleSectionPrompts } from '../core/prompts.mjs';
 
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.NOESIS_CREATOR_PORT || process.env.ARTEST_CREATOR_PORT || 18100);
@@ -857,7 +859,7 @@ function handleApi(req, res, urlPath) {
   // ================= Nucleo generico: schede-lezione (Fase 2, additivo) =================
   // Namespace deciso: /api/cards + /api/materie (le legacy /api/subjects arte restano intatte).
   function cardPublic(c) {
-    return { id: c.id, modelloId: c.modelloId, titolo: c.titolo, stato: c.stato, createdAt: c.createdAt, updatedAt: c.updatedAt };
+    return { id: c.id, modelloId: c.modelloId, titolo: c.titolo, stato: c.stato, sezioniAttive: c.sezioniAttive, createdAt: c.createdAt, updatedAt: c.updatedAt };
   }
   function cardFullPublic(id) {
     const full = getSchedaFull(id);
@@ -875,11 +877,219 @@ function handleApi(req, res, urlPath) {
     return json(res, 200, { materie: listMaterie() });
   }
 
+  // POST /api/materie { id?, nome, descrizione?, systemPrompt? } — nuova materia (wizard)
+  if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'materie') {
+    return readBody(req).then((input) => {
+      const nome = String(input.nome || '').trim();
+      if (!nome) return err(res, 400, 'nome obbligatorio');
+      const id = input.id ? slugify(input.id) : slugify(nome);
+      if (!id) return err(res, 400, 'id non valido');
+      if (getMateria(id)) return err(res, 409, 'Esiste già una materia con id ' + id);
+      const created = upsertMateria({ id, nome, descrizione: String(input.descrizione || ''), systemPrompt: String(input.systemPrompt || '') });
+      return json(res, 201, { materia: created });
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // PATCH /api/materie/:id { nome?, descrizione?, systemPrompt?, stato? }
+  if (method === 'PATCH' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'materie') {
+    return readBody(req).then((input) => {
+      try {
+        const saved = updateMateria(parts[2], {
+          nome: input.nome !== undefined ? String(input.nome) : undefined,
+          descrizione: input.descrizione !== undefined ? String(input.descrizione) : undefined,
+          systemPrompt: input.systemPrompt !== undefined ? String(input.systemPrompt) : undefined,
+          stato: input.stato !== undefined ? String(input.stato) : undefined,
+        });
+        if (!saved) return err(res, 404, 'Materia non trovata');
+        return json(res, 200, { materia: saved });
+      } catch (e) { return err(res, 400, e.message); }
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // DELETE /api/materie/:id — rifiutata se ha modelli (cascata solo su vuoto)
+  if (method === 'DELETE' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'materie') {
+    if (!getMateria(parts[2])) return err(res, 404, 'Materia non trovata');
+    if (listModelli(parts[2]).length) return err(res, 409, 'La materia ha modelli: eliminali prima');
+    deleteMateria(parts[2]);
+    return json(res, 200, { ok: true });
+  }
+
+  // Valida un sottoinsieme di sezioni attive contro lo schema del modello.
+  function checkAttive(modello, attive) {
+    const keys = (modello?.schema?.sections || []).map((s) => s.key);
+    const errs = [];
+    for (const k of (attive || [])) {
+      if (!keys.includes(k)) errs.push('sezione attiva sconosciuta: ' + k);
+    }
+    for (const s of (modello?.schema?.sections || [])) {
+      if (s.required && !(attive || []).includes(s.key)) errs.push('sezione required esclusa: ' + s.key);
+    }
+    return errs;
+  }
+  // Valida le definizioni di sezione presenti (permette modello draft senza sezioni).
+  function checkSectionDefs(sections) {
+    const errs = [];
+    const seen = new Set();
+    (sections || []).forEach((s, i) => {
+      const where = `sections[${i}]`;
+      if (!s || typeof s !== 'object') { errs.push(`${where}: non è un oggetto`); return; }
+      if (!String(s.key || '').trim()) errs.push(`${where}: key mancante`);
+      else if (seen.has(s.key)) errs.push(`${where}: key duplicata "${s.key}"`);
+      else seen.add(s.key);
+      if (!String(s.title || '').trim()) errs.push(`${where}: title mancante`);
+      if (!isKnownSectionType(s.type)) errs.push(`${where}: type sconosciuto "${s.type}"`);
+      if (s.maxWords !== undefined && s.maxWords !== null && s.maxWords !== '' && (!Number.isInteger(Number(s.maxWords)) || Number(s.maxWords) < 1)) errs.push(`${where}: maxWords non valido`);
+    });
+    return errs;
+  }
+
   // GET /api/models?subject=filosofia — modelli di una materia (schemi completi per l'editor generico)
   if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'models') {
     const subject = new URL(req.url, 'http://localhost').searchParams.get('subject') || '';
     if (!subject) return err(res, 400, 'Parametro subject obbligatorio (es. ?subject=filosofia)');
     return json(res, 200, { models: listModelli(subject) });
+  }
+
+  // POST /api/models { materiaId, chiave?, nome, fromTemplate? } — nuovo modello v1 (wizard).
+  // fromTemplate: id modello ("materie:chiave:vN") da clonare. Sezioni: [] (draft) o ereditate.
+  if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'models') {
+    return readBody(req).then((input) => {
+      try {
+        const materiaId = String(input.materiaId || '').trim();
+        if (!getMateria(materiaId)) return err(res, 400, 'Materia sconosciuta: ' + (input.materiaId || ''));
+        const nome = String(input.nome || '').trim();
+        if (!nome) return err(res, 400, 'nome obbligatorio');
+        const chiave = input.chiave ? slugify(input.chiave) : slugify(nome);
+        if (!chiave) return err(res, 400, 'chiave non valida');
+        let schema;
+        if (input.fromTemplate) {
+          const tpl = getModello(String(input.fromTemplate));
+          if (!tpl) return err(res, 400, 'Template sconosciuto: ' + input.fromTemplate);
+          schema = JSON.parse(JSON.stringify(tpl.schema));
+          schema.key = chiave; schema.subject = materiaId; schema.name = nome; schema.version = 1;
+          schema.cover = tpl.schema.cover || { eyebrow: 'Scheda didattica', heroRole: 'hero' };
+          // Sezioni esplicite: sostituiscono il clone (wizard con modifiche).
+          if (Array.isArray(input.sections) && input.sections.length) schema.sections = input.sections;
+        } else {
+          schema = {
+            key: chiave, subject: materiaId, name: nome, version: 1,
+            cover: { eyebrow: 'Scheda didattica · ' + materiaId, heroRole: 'hero' },
+            sections: Array.isArray(input.sections) ? input.sections : [],
+          };
+        }
+        const defErrs = checkSectionDefs(schema.sections);
+        if (defErrs.length) return err(res, 400, 'Sezioni non valide: ' + defErrs.join('; '));
+        if (getModello(`${materiaId}:${chiave}:v1`)) return err(res, 409, 'Esiste già il modello ' + materiaId + ':' + chiave + ':v1');
+        const created = upsertModello({ materiaId, chiave, nome, versione: 1, schema });
+        return json(res, 201, { model: created });
+      } catch (e) {
+        return err(res, String(e.message || '').includes('UNIQUE') ? 409 : 400, e.message);
+      }
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // PATCH /api/models/:id { nome?, systemPrompt? } — ridenominazione/voce (lo schema via sections/fork)
+  if (method === 'PATCH' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'models') {
+    return readBody(req).then((input) => {
+      const current = getModello(parts[2]);
+      if (!current) return err(res, 404, 'Modello non trovato');
+      const nome = input.nome !== undefined ? String(input.nome).trim() : current.nome;
+      if (!nome) return err(res, 400, 'nome obbligatorio');
+      const schema = JSON.parse(JSON.stringify(current.schema));
+      schema.name = nome;
+      if (input.systemPrompt !== undefined) {
+        if (String(input.systemPrompt).trim()) schema.system_prompt = String(input.systemPrompt);
+        else delete schema.system_prompt;
+      }
+      const saved = updateModello(parts[2], { nome, schema });
+      return json(res, 200, { model: saved });
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // DELETE /api/models/:id — rifiutato se ha schede
+  if (method === 'DELETE' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'models') {
+    if (!getModello(parts[2])) return err(res, 404, 'Modello non trovato');
+    if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: crea una nuova versione con fork');
+    deleteModello(parts[2]);
+    return json(res, 200, { ok: true });
+  }
+
+  // POST /api/models/:id/fork — clona in vN+1 (unica strada con schede esistenti)
+  if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'models' && parts[3] === 'fork') {
+    const current = getModello(parts[2]);
+    if (!current) return err(res, 404, 'Modello non trovato');
+    const schema = JSON.parse(JSON.stringify(current.schema));
+    schema.version = current.versione + 1;
+    const created = upsertModello({ materiaId: current.materiaId, chiave: current.chiave, nome: current.nome, versione: schema.version, schema });
+    return json(res, 201, { model: created });
+  }
+
+  // POST /api/models/:id/sections { key?, title, type, required?, prompt?, system?, maxWords? }
+  if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'models' && parts[3] === 'sections') {
+    return readBody(req).then((input) => {
+      const current = getModello(parts[2]);
+      if (!current) return err(res, 404, 'Modello non trovato');
+      if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: crea una nuova versione con fork');
+      const schema = JSON.parse(JSON.stringify(current.schema));
+      schema.sections = Array.isArray(schema.sections) ? schema.sections : [];
+      const def = {
+        key: input.key ? slugify(input.key) : slugify(input.title || ''),
+        title: String(input.title || '').trim(),
+        type: String(input.type || '').trim(),
+        required: input.required === true,
+      };
+      if (input.prompt !== undefined) def.prompt = String(input.prompt);
+      if (input.system !== undefined) def.system = String(input.system);
+      if (input.maxWords !== undefined && input.maxWords !== null && input.maxWords !== '') def.maxWords = Number(input.maxWords);
+      if (input.groups !== undefined) def.groups = input.groups;
+      if (input.withImages !== undefined) def.withImages = input.withImages === true;
+      if (input.fullpage !== undefined) def.fullpage = input.fullpage === true;
+      const errs = checkSectionDefs([...schema.sections, def]);
+      if (errs.length) return err(res, 400, 'Sezione non valida: ' + errs.join('; '));
+      schema.sections.push(def);
+      const saved = updateModello(parts[2], { schema });
+      return json(res, 201, { model: saved, section: def });
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // PATCH /api/models/:id/sections/:sez — modifica definizione (409 con schede)
+  if (method === 'PATCH' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'models' && parts[3] === 'sections') {
+    return readBody(req).then((input) => {
+      const current = getModello(parts[2]);
+      if (!current) return err(res, 404, 'Modello non trovato');
+      if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: crea una nuova versione con fork');
+      const schema = JSON.parse(JSON.stringify(current.schema));
+      schema.sections = Array.isArray(schema.sections) ? schema.sections : [];
+      const idx = schema.sections.findIndex((s) => s.key === parts[4]);
+      if (idx < 0) return err(res, 404, 'Sezione sconosciuta: ' + parts[4]);
+      const next = { ...schema.sections[idx] };
+      for (const k of ['title', 'type', 'prompt', 'system']) {
+        if (input[k] !== undefined) next[k] = String(input[k]);
+      }
+      if (input.required !== undefined) next.required = input.required === true;
+      if (input.maxWords !== undefined) {
+        if (input.maxWords === null || input.maxWords === '') delete next.maxWords;
+        else next.maxWords = Number(input.maxWords);
+      }
+      if (input.groups !== undefined) next.groups = input.groups;
+      const rest = schema.sections.filter((_, i) => i !== idx);
+      const errs = checkSectionDefs([...rest.slice(0, idx), next, ...rest.slice(idx)]);
+      if (errs.length) return err(res, 400, 'Sezione non valida: ' + errs.join('; '));
+      schema.sections[idx] = next;
+      const saved = updateModello(parts[2], { schema });
+      return json(res, 200, { model: saved, section: next });
+    }).catch(e => err(res, 400, e.message));
+  }
+
+  // DELETE /api/models/:id/sections/:sez (409 con schede)
+  if (method === 'DELETE' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'models' && parts[3] === 'sections') {
+    const current = getModello(parts[2]);
+    if (!current) return err(res, 404, 'Modello non trovato');
+    if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: crea una nuova versione con fork');
+    const schema = JSON.parse(JSON.stringify(current.schema));
+    schema.sections = (Array.isArray(schema.sections) ? schema.sections : []).filter((s) => s.key !== parts[4]);
+    const saved = updateModello(parts[2], { schema });
+    return json(res, 200, { ok: true, model: saved });
   }
 
   // GET /api/cards?modello=&stato= — elenco schede-lezione
@@ -889,13 +1099,24 @@ function handleApi(req, res, urlPath) {
     return json(res, 200, { cards: cards.map(cardPublic) });
   }
 
-  // POST /api/cards { modelloId, titolo?, id? } — nuova scheda-lezione
+  // POST /api/cards { modelloId, titolo?, id?, sezioniAttive? } — nuova scheda-lezione
+  // sezioniAttive: sottoinsieme di chiavi (le required sempre incluse); null = tutte.
   if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'cards') {
     return readBody(req).then((input) => {
       if (!input.modelloId) return err(res, 400, 'modelloId obbligatorio');
-      if (!getModello(input.modelloId)) return err(res, 400, 'Modello sconosciuto: ' + input.modelloId);
+      const modello = getModello(input.modelloId);
+      if (!modello) return err(res, 400, 'Modello sconosciuto: ' + input.modelloId);
+      const modelErrs = validateModel({ ...modello.schema, key: modello.chiave, subject: modello.materiaId, name: modello.nome, version: modello.versione });
+      if (modelErrs.length) return err(res, 400, 'Modello non valido (draft incompleto?): ' + modelErrs.join('; '));
+      let attive = null;
+      if (input.sezioniAttive !== undefined && input.sezioniAttive !== null) {
+        if (!Array.isArray(input.sezioniAttive)) return err(res, 400, 'sezioniAttive deve essere un array di chiavi');
+        attive = input.sezioniAttive.map(String);
+        const attErrs = checkAttive(modello, attive);
+        if (attErrs.length) return err(res, 400, attErrs.join('; '));
+      }
       try {
-        const created = createScheda({ id: input.id || null, modelloId: input.modelloId, titolo: input.titolo || '' });
+        const created = createScheda({ id: input.id || null, modelloId: input.modelloId, titolo: input.titolo || '', sezioniAttive: attive });
         return json(res, 201, { card: cardPublic(created) });
       } catch (e) {
         return err(res, String(e.message || '').includes('già una scheda') ? 409 : 400, e.message);
@@ -910,10 +1131,28 @@ function handleApi(req, res, urlPath) {
     return json(res, 200, full);
   }
 
-  // PATCH /api/cards/:id { titolo } — revisione metadati
+  // PATCH /api/cards/:id { titolo?, sezioniAttive? } — revisione metadati
+  // sezioniAttive modificabile solo in draft (mai su ready pubblicata).
   if (method === 'PATCH' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'cards') {
     return readBody(req).then((input) => {
-      const saved = updateScheda(parts[2], { titolo: input.titolo !== undefined ? String(input.titolo) : undefined });
+      const current = getScheda(parts[2]);
+      if (!current) return err(res, 404, 'Scheda non trovata');
+      const patch = {};
+      if (input.titolo !== undefined) patch.titolo = String(input.titolo);
+      if (input.sezioniAttive !== undefined) {
+        if (current.stato === 'ready') return err(res, 400, 'Scheda già pronta: le sezioni attive non si cambiano su ready');
+        if (input.sezioniAttive === null) {
+          patch.sezioniAttive = null;
+        } else if (Array.isArray(input.sezioniAttive)) {
+          const modello = getModello(current.modelloId);
+          const attErrs = checkAttive(modello, input.sezioniAttive.map(String));
+          if (attErrs.length) return err(res, 400, attErrs.join('; '));
+          patch.sezioniAttive = input.sezioniAttive.map(String);
+        } else {
+          return err(res, 400, 'sezioniAttive deve essere un array di chiavi o null');
+        }
+      }
+      const saved = updateScheda(parts[2], patch);
       if (!saved) return err(res, 404, 'Scheda non trovata');
       return json(res, 200, { card: cardPublic(saved) });
     }).catch(e => err(res, 400, e.message));
@@ -953,16 +1192,28 @@ function handleApi(req, res, urlPath) {
     const apiKey = getOpenRouterApiKey();
     if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
     return readBody(req).then(async (input) => {
-      const prompt = buildSectionPrompt({ modello: modello.schema, sezione: def, titoloScheda: scheda.titolo, livello: String((input && input.livello) || '') });
+      const materia = getMateria(modello.materiaId);
+      const { system, user, version } = assembleSectionPrompts({ materia, modello: modello.schema, sezione: def, titoloScheda: scheda.titolo, livello: String((input && input.livello) || '') });
       try {
-        const raw = await callModel(TEXT_MODEL, [{ type: 'text', text: prompt }], apiKey);
+        const raw = await callModel(TEXT_MODEL, [{ type: 'text', text: user }], apiKey, undefined, { system });
         const corpo = normalizeSectionBody(def.type, raw.data);
         const warnings = validateBody(def.type, corpo);
         if (isBodyEmpty(def.type, corpo)) warnings.push('sezione vuota: il modello non ha restituito contenuti, riprova la generazione');
-        const saved = saveSezione(parts[2], parts[4], corpo);
+        const saved = saveSezione(parts[2], parts[4], corpo, { model: modello.id, promptVersion: version });
         return json(res, 200, { section: saved, warnings });
       } catch (e) { console.error('ERR genSection:', e); return err(res, 500, e.message); }
     }).catch(e => err(res, 400, e.message));
+  }
+
+  // GET /api/prompts/preview?modello=<id>&sezione=<key>[&titolo=][&livello=] — system+user assemblati (debug)
+  if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'prompts' && parts[2] === 'preview') {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const modello = getModello(q.get('modello') || '');
+    if (!modello) return err(res, 404, 'Modello sconosciuto: ' + (q.get('modello') || ''));
+    const def = (modello.schema.sections || []).find((s) => s.key === (q.get('sezione') || ''));
+    if (!def) return err(res, 404, 'Sezione sconosciuta per questo modello: ' + (q.get('sezione') || ''));
+    const materia = getMateria(modello.materiaId);
+    return json(res, 200, assembleSectionPrompts({ materia, modello: modello.schema, sezione: def, titoloScheda: q.get('titolo') || '', livello: q.get('livello') || '' }));
   }
 
   // POST /api/cards/:id/approve — ready (+ gate required come il legacy)

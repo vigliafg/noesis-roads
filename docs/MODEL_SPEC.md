@@ -2,7 +2,8 @@
 
 Un *modello di scheda* è un documento JSON versionato che dichiara le sezioni
 di un tipo di scheda-lezione per una materia. Stesso formato per i modelli
-fissi iniziali e (in futuro) per quelli creati dall'utente.
+fissi iniziali e per quelli creati dall'utente (wizard "+ Nuova materia",
+API `/api/models`, versioni con fork: mai UPDATE con schede esistenti).
 
 ## Formato
 

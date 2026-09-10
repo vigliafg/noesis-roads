@@ -244,7 +244,8 @@ export function buildGenericPdfPayload(full, io = {}) {
   const ref = (key, data, mime) => imageRef(images, key, data, mime);
   const getImg = io.getImmagine || getImmagine;
   const schema = (full.modello && full.modello.schema) || {};
-  const sections = (Array.isArray(schema.sections) ? schema.sections : []);
+  const attive = Array.isArray(full.sezioniAttive) ? full.sezioniAttive : null;
+  const sections = (Array.isArray(schema.sections) ? schema.sections : []).filter((d) => !attive || attive.includes(d.key));
   const corpi = new Map((full.sezioni || []).map((s) => [s.chiave, s.corpo || {}]));
   const metas = (full.immagini || []);
   const byId = new Map();

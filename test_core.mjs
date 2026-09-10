@@ -68,6 +68,9 @@ test('db nucleo: seed + scheda + gate required + immagini + RO', async () => {
     assert.equal(seeded.modelli, 6);
     assert.equal(db.listMaterie().length, 2);
     assert.equal(db.listModelli('filosofia').length, 3);
+    db.updateMateria('filosofia', { systemPrompt: 'Tono custom.' });
+    db.seedCore({ materie: core.listMaterie(), modelli: [] });
+    assert.equal(db.getMateria('filosofia').systemPrompt, 'Tono custom.'); // il seed non sovrascrive
 
     const modelloId = db.modelloIdStabile('filosofia', 'autore-pensiero', 1);
     const scheda = db.createScheda({ id: 'kant-1', modelloId, titolo: 'Kant' });
@@ -325,6 +328,12 @@ test('Viewer generico: /api/materie /models /cards + immagini (sola lettura)', a
     const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
     const imgId = db.addImmagine('kant-v', 'ritratto', pixel, 'image/png');
     db.createScheda({ id: 'bozza-v', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Bozza' });
+    db.createScheda({ id: 'sub-v', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere'] });
+    db.saveSezione('sub-v', 'vita', { text: 'Vita.' });
+    db.saveSezione('sub-v', 'nuclei', { items: [{ title: 'T', text: 'x' }] });
+    db.saveSezione('sub-v', 'opere', { works: [{ title: 'W', artist: 'A' }] });
+    assert.throws(() => db.saveSezione('sub-v', 'concetti', { entries: [] }), /non attiva/); // fuori attive: rifiutata ovunque
+    assert.equal(db.approveScheda('sub-v').ok, true);
 
     // Viewer in subprocess (isolamento DB come nel test delle cards: l'istanza
     // db.mjs importata in-process punterebbe al DB reale, non a quello temp).
@@ -378,6 +387,12 @@ test('Viewer generico: /api/materie /models /cards + immagini (sola lettura)', a
     assert.equal(res.status, 200);
     assert.ok((res.headers.get('content-type') || '').includes('image/png'));
 
+    res = await fetch(base + '/api/cards/sub-v');
+    assert.equal(res.status, 200);
+    const sub = await res.json();
+    assert.deepEqual(sub.sezioni.map((s) => s.chiave).sort(), ['nuclei', 'opere', 'vita']);
+    assert.ok(!sub.modello.schema.sections.some((s) => s.key === 'concetti'));
+    assert.ok(sub.modello.schema.sections.some((s) => s.key === 'vita'));
     res = await fetch(base + '/api/cards/bozza-v');
     assert.equal(res.status, 404); // draft non visibile nel viewer
     res = await fetch(base + '/api/cards/inesistente');
@@ -613,6 +628,8 @@ test('generate sezione: percorso completo con OpenRouter simulato (regressione n
     assert.deepEqual(r.body.warnings, []);
     assert.equal(r.body.section.corpo.items.length, 2);
     assert.equal(r.body.section.corpo.items[0].title, 'Critica');
+    assert.equal(r.body.section.model, 'filosofia:autore-pensiero:v1');
+    assert.ok(/^v1:[0-9a-f]{8}$/.test(r.body.section.promptVersion), 'timbro prompt_version');
     assert.equal(calls, 1);
     // Rilettura: la sezione è persistita
     r = await asJson('GET', '/api/cards/gen-1');
@@ -630,5 +647,138 @@ test('generate sezione: percorso completo con OpenRouter simulato (regressione n
     if (stub) await new Promise((r2) => stub.close(r2));
     if (previousDb === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previousDb;
     await rmDir5(dir, { recursive: true, force: true });
+  }
+});
+
+test('API wizard: materie/modelli/sezioni/fork + sezioniAttive + preview', async () => {
+  const { mkdtemp: mkd6, rm: rmDir6 } = await import('node:fs/promises');
+  const { tmpdir: tmpDir6 } = await import('node:os');
+  const { join: joinPath6 } = await import('node:path');
+  const { fork: forkProc6 } = await import('node:child_process');
+  const { writeFile: writeTmp6 } = await import('node:fs/promises');
+  const dir = await mkd6(joinPath6(tmpDir6(), 'noesis-wiz-'));
+  const dbPath = joinPath6(dir, 'w.db');
+  const previousDb = process.env.NOESIS_CREATOR_DB;
+  process.env.NOESIS_CREATOR_DB = dbPath;
+  let child;
+  try {
+    const serverAbs = joinPath6(process.cwd(), 'noesis-roads-creator', 'server.mjs');
+    const tmpScript = joinPath6(dir, 'spawn.mjs');
+    await writeTmp6(tmpScript, [
+      `import { createCreatorServer } from 'file://${serverAbs}';`,
+      'const s = createCreatorServer();',
+      's.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port) + "\\n"); });',
+    ].join('\n'));
+    child = forkProc6(tmpScript, [], { env: { ...process.env, NOESIS_CREATOR_DB: dbPath }, silent: true });
+    const port = await new Promise((resolve, reject) => {
+      let out = '';
+      const timer = setTimeout(() => reject(new Error('timeout subserver')), 15000);
+      child.stdout.on('data', (c) => {
+        out += String(c);
+        const nl = out.indexOf('\n');
+        if (nl >= 0) { clearTimeout(timer); resolve(Number(out.slice(0, nl).trim())); }
+      });
+      child.on('error', (e) => { clearTimeout(timer); reject(e); });
+      child.on('exit', (code) => { clearTimeout(timer); reject(new Error('subserver uscito, codice ' + code)); });
+    });
+    const base = 'http://127.0.0.1:' + port;
+    const asJson = (method, path, body) => fetch(base + path, {
+      method, headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+
+    // --- materie ---
+    let r = await asJson('POST', '/api/materie', { nome: '' });
+    assert.equal(r.status, 400);
+    r = await asJson('POST', '/api/materie', { id: 'musica', nome: 'Storia della musica', systemPrompt: 'Sei un musicologo.' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.materia.systemPrompt, 'Sei un musicologo.');
+    r = await asJson('POST', '/api/materie', { id: 'musica', nome: 'Dup' });
+    assert.equal(r.status, 409);
+    r = await asJson('PATCH', '/api/materie/musica', { descrizione: 'Note e spartiti.' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.materia.descrizione, 'Note e spartiti.');
+    assert.equal(r.body.materia.systemPrompt, 'Sei un musicologo.'); // preservato
+    r = await asJson('DELETE', '/api/materie/musica');
+    assert.equal(r.status, 200); // vuota: si elimina
+
+    // --- modelli: draft, validazione, template, fork ---
+    r = await asJson('POST', '/api/models', { materiaId: 'filosofia', nome: 'Bozza' });
+    assert.equal(r.status, 201);
+    assert.deepEqual(r.body.model.schema.sections, []);
+    const draftId = r.body.model.id;
+    r = await asJson('POST', '/api/cards', { modelloId: draftId, titolo: 'X' });
+    assert.equal(r.status, 400); // draft senza sezioni: niente schede
+    assert.ok(r.body.error.message.includes('non valido'));
+    r = await asJson('POST', '/api/models/' + encodeURIComponent(draftId) + '/sections', { key: 'vita', title: '', type: 'text' });
+    assert.equal(r.status, 400); // title mancante
+    r = await asJson('POST', '/api/models/' + encodeURIComponent(draftId) + '/sections', { key: 'vita', title: 'Vita', type: 'nope' });
+    assert.equal(r.status, 400); // tipo sconosciuto
+    r = await asJson('POST', '/api/models/' + encodeURIComponent(draftId) + '/sections',
+      { key: 'vita', title: 'Vita', type: 'text', required: true, prompt: 'Racconta la vita.', maxWords: 180 });
+    assert.equal(r.status, 201);
+    r = await asJson('POST', '/api/models/' + encodeURIComponent(draftId) + '/sections', { key: 'vita', title: 'Dup', type: 'text' });
+    assert.equal(r.status, 400); // chiave duplicata
+    r = await asJson('POST', '/api/cards', { id: 'mw-1', modelloId: draftId, titolo: 'Prova' });
+    assert.equal(r.status, 201); // ora valido
+    r = await asJson('PATCH', '/api/models/' + encodeURIComponent(draftId) + '/sections/vita', { title: 'Cambio' });
+    assert.equal(r.status, 409); // congelato: ha schede
+    r = await asJson('DELETE', '/api/models/' + encodeURIComponent(draftId));
+    assert.equal(r.status, 409);
+    r = await asJson('POST', '/api/models/' + encodeURIComponent(draftId) + '/fork', {});
+    assert.equal(r.status, 201);
+    assert.ok(r.body.model.id.endsWith(':v2'));
+    const v2 = r.body.model.id;
+    r = await asJson('PATCH', '/api/models/' + encodeURIComponent(v2) + '/sections/vita', { title: 'Vita e contesto' });
+    assert.equal(r.status, 200); // v2 senza schede: libero
+    r = await asJson('POST', '/api/models', { materiaId: 'filosofia', chiave: 'autore2', nome: 'Autore 2', fromTemplate: 'filosofia:autore-pensiero:v1' });
+    assert.equal(r.status, 201);
+    assert.ok(r.body.model.schema.sections.length >= 5); // clone ereditato
+    r = await asJson('DELETE', '/api/models/' + encodeURIComponent(r.body.model.id));
+    assert.equal(r.status, 200); // senza schede: si elimina
+
+    // --- sezioniAttive sulle cards ---
+    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Sub', sezioniAttive: ['vita'] });
+    assert.equal(r.status, 400); // required escluse
+    assert.ok(r.body.error.message.includes('required'));
+    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere', 'nope'] });
+    assert.equal(r.status, 400); // chiave sconosciuta
+    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere'] });
+    assert.equal(r.status, 201);
+    assert.deepEqual(r.body.card.sezioniAttive, ['vita', 'nuclei', 'opere']);
+    r = await asJson('PATCH', '/api/cards/mw-sub/sections/concetti', { corpo: { entries: [] } });
+    assert.equal(r.status, 400); // fuori attive
+    assert.ok(r.body.error.message.includes('non attiva'));
+    r = await asJson('PATCH', '/api/cards/mw-sub/sections/vita', { corpo: { text: 'Vita.' } });
+    assert.equal(r.status, 200);
+    r = await asJson('PATCH', '/api/cards/mw-sub', { sezioniAttive: ['vita'] });
+    assert.equal(r.status, 400); // toglierebbe required
+    r = await asJson('POST', '/api/cards/mw-sub/approve', {});
+    assert.equal(r.status, 400); // nuclei+opere vuote
+    r = await asJson('PATCH', '/api/cards/mw-sub/sections/nuclei', { corpo: { items: [{ title: 'T', text: 'x' }] } });
+    assert.equal(r.status, 200);
+    r = await asJson('PATCH', '/api/cards/mw-sub/sections/opere', { corpo: { works: [{ title: 'W', artist: 'A' }] } });
+    assert.equal(r.status, 200);
+    r = await asJson('POST', '/api/cards/mw-sub/approve', {});
+    assert.equal(r.status, 200); // gate sulle attive
+    r = await asJson('PATCH', '/api/cards/mw-sub', { sezioniAttive: ['vita', 'nuclei', 'opere', 'concetti'] });
+    assert.equal(r.status, 400); // ready: attive congelate
+
+    // --- preview prompt ---
+    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero%3Av1&sezione=nuclei');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.system.includes('SOLO con JSON valido'));
+    assert.ok(r.body.user.includes('nuclei'));
+    assert.ok(/^v1:[0-9a-f]{8}$/.test(r.body.version));
+    r = await asJson('GET', '/api/prompts/preview?modello=nope&sezione=nuclei');
+    assert.equal(r.status, 404);
+  } finally {
+    if (child) {
+      try { child.kill('SIGTERM'); } catch {}
+      await new Promise((r2) => setTimeout(r2, 50));
+      try { child.kill('SIGKILL'); } catch {}
+    }
+    if (previousDb === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previousDb;
+    await rmDir6(dir, { recursive: true, force: true });
   }
 });
