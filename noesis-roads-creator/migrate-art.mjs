@@ -189,7 +189,7 @@ export function migrateAll(opts = {}) {
   const { dryRun = false } = opts;
   const core = D(opts);
   core.initSchema();
-  core.seedCore({ materie: listMaterie(), modelli: [...listModelli('arte'), ...listModelli('filosofia')] });
+  core.seedCore({ materie: listMaterie(), modelli: listMaterie().flatMap((m) => listModelli(m.id)) });
   const warnings = [];
   const report = { dryRun, warnings, artworks: [], subjects: [], comparisons: [] };
   const o = { ...opts, warnings };

@@ -8,6 +8,8 @@ export const MATERIE = Object.freeze([
     systemPrompt: "Sei uno storico dell'arte e un educatore italiano: preciso su opere, date e attribuzioni, chiaro con gli studenti." },
   { id: 'filosofia', nome: 'Storia della filosofia', descrizione: 'Autori, tematiche e confronti filosofici.', stato: 'attiva',
     systemPrompt: 'Sei uno storico della filosofia e un educatore italiano: rigoroso sulle dottrine attestate, chiaro con gli studenti.' },
+  { id: 'letteratura-italiana', nome: 'Letteratura Italiana', descrizione: 'Autori, opere e confronti della letteratura italiana.', stato: 'attiva',
+    systemPrompt: 'Sei uno storico della letteratura italiana rigoroso e chiaro: date, opere e testi attestati, mai inventare citazioni.' },
 ]);
 
 function artModels() {
@@ -82,6 +84,18 @@ function philosophyModels() {
       ],
     },
     {
+      key: 'opera-filosofica', subject: 'filosofia', name: "L'opera filosofica", version: 1,
+      cover: { eyebrow: 'Scheda didattica · filosofia', heroRole: 'copertina' },
+      sections: [
+        { key: 'argomento', title: "La tesi dell'opera", type: 'text', required: true, maxWords: 200, prompt: "Tesi centrale dell'opera in breve; solo dottrine attestate, mai inventare." },
+        { key: 'genesi', title: 'Genesi e composizione', type: 'text', required: true, maxWords: 200, prompt: 'Quando e dove composta, contesto, edizione di riferimento.' },
+        { key: 'struttura', title: 'Struttura argomentativa', type: 'points', required: true, prompt: 'Argomentazione in 3-6 voci titolo+testo: parti o capitoli e loro funzione.' },
+        { key: 'concetti', title: 'Concetti chiave', type: 'kv', required: true, prompt: 'Concetti chiave 4-6: termine verso significato rigoroso.' },
+        { key: 'fortuna', title: 'Fortuna e ricezione', type: 'epochs', required: false, prompt: 'Ricezione ed edizioni per epoche, 4-6 capitoli documentati.' },
+        { key: 'questioni', title: 'Questioni aperte', type: 'text', required: false, maxWords: 180, prompt: 'Dibattiti interpretativi reali.' },
+      ],
+    },
+    {
       key: 'confronto-filosofico', subject: 'filosofia', name: 'Il confronto tra due autori', version: 1,
       cover: { eyebrow: 'Scheda didattica · filosofia', heroRole: 'ritratto' },
       sections: [
@@ -98,7 +112,36 @@ function philosophyModels() {
   ];
 }
 
-const _MODELS = [...artModels(), ...philosophyModels()];
+function letteraturaModels() {
+  return [
+    {
+      key: 'opera-letteraria', subject: 'letteratura-italiana', name: "L'opera letteraria", version: 1,
+      cover: { eyebrow: 'Scheda didattica · Letteratura Italiana', heroRole: 'copertina' },
+      sections: [
+        { key: 'argomento', title: "L'argomento", type: 'text', required: true, maxWords: 200, prompt: 'Argomento in breve: di cosa parla, antefatto essenziale, senza riassunto integrale; solo contenuti attestati.' },
+        { key: 'genesi', title: 'Genesi e composizione', type: 'text', required: true, maxWords: 200, prompt: "Quando e dove composta, per chi, dediche, revisioni e varianti d'autore documentate." },
+        { key: 'struttura', title: "Struttura dell'opera", type: 'points', required: true, prompt: 'Partizioni (canti, capitoli, atti) in 3-6 voci titolo+testo: cosa contiene ciascuna e la sua funzione.' },
+        { key: 'stile', title: 'Stile e lingua', type: 'text', required: true, maxWords: 200, prompt: 'Forma metrica o prosa, lingua, stilemi riconoscibili con esempi brevi e verificabili.' },
+        { key: 'fortuna', title: 'Fortuna e ricezione', type: 'epochs', required: false, prompt: 'Per epoche, 4-6 capitoli: edizioni principali, giudizi e riusi documentati, mai inventare date.' },
+        { key: 'curiosita', title: 'Edizioni e curiosità', type: 'text', required: false, maxWords: 150, prompt: 'Questioni filologiche e aneddoti: solo fatti verificabili, mai inventare citazioni.' },
+      ],
+    },
+    {
+      key: 'tematica-letteraria', subject: 'letteratura-italiana', name: 'Il tema letterario', version: 1,
+      cover: { eyebrow: 'Scheda didattica · Letteratura Italiana', heroRole: 'hero' },
+      sections: [
+        { key: 'introduzione', title: 'Introduzione', type: 'text', required: true, maxWords: 200, prompt: 'Introduzione al tema letterario: di cosa si tratta e perché conta.' },
+        { key: 'origini', title: 'Origini del tema', type: 'text', required: true, maxWords: 200, prompt: 'Origini del tema: dove e con chi nasce nella letteratura.' },
+        { key: 'evoluzione', title: 'Evoluzione per epoche', type: 'epochs', required: true, prompt: 'Evoluzione per epoche: 5-6 capitoli con autori e opere reali.' },
+        { key: 'opere', title: 'Opere ed edizioni', type: 'works', withImages: true, required: true, prompt: 'Opere ed edizioni rappresentative con galleria semplice: titolo, autore, data, perché conta (max 25 parole).' },
+        { key: 'interpretazioni', title: 'Interpretazioni', type: 'text', required: false, maxWords: 220, prompt: 'Interpretazioni principali del tema.' },
+        { key: 'curiosita', title: 'Curiosità e questioni', type: 'text', required: false, maxWords: 180, prompt: 'Curiosità e questioni aperte, solo fatti verificabili.' },
+      ],
+    },
+  ];
+}
+
+const _MODELS = [...artModels(), ...philosophyModels(), ...letteraturaModels()];
 
 export function listMaterie() {
   return MATERIE.map((m) => ({ ...m }));

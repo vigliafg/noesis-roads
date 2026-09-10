@@ -31,11 +31,12 @@ test('modelSpec: modello valido passa, modello rotto elenca gli errori', () => {
   assert.ok(validateModel({ key: 'x', subject: 's', name: 'n', version: 1, cover: { eyebrow: 'e', heroRole: 'h' }, sections: [] }).some((e) => e.includes('almeno una')));
 });
 
-test('models: 2 materie x 3 modelli, tutti validi', () => {
-  assert.deepEqual(listMaterie().map((m) => m.id), ['arte', 'filosofia']);
+test('models: 3 materie (3+4+2 modelli), tutti validi', () => {
+  assert.deepEqual(listMaterie().map((m) => m.id), ['arte', 'filosofia', 'letteratura-italiana']);
+  assert.deepEqual(listModelli('letteratura-italiana').map((m) => m.key), ['opera-letteraria', 'tematica-letteraria']);
+  assert.deepEqual(listModelli('filosofia').map((m) => m.key), ['autore-pensiero', 'tematica', 'opera-filosofica', 'confronto-filosofico']);
   assert.deepEqual(listModelli('arte').map((m) => m.key), ['opera', 'soggetto', 'confronto']);
-  assert.deepEqual(listModelli('filosofia').map((m) => m.key), ['autore-pensiero', 'tematica', 'confronto-filosofico']);
-  for (const materia of ['arte', 'filosofia']) {
+  for (const materia of ['arte', 'filosofia', 'letteratura-italiana']) {
     for (const m of listModelli(materia)) assert.deepEqual(validateModel(m), [], `modello ${materia}:${m.key}`);
   }
   assert.equal(getModello('filosofia', 'inesistente'), null);
@@ -63,11 +64,11 @@ test('db nucleo: seed + scheda + gate required + immagini + RO', async () => {
     const db = await import('./noesis-roads-creator/db.mjs?t=' + Date.now());
     const core = await import('./core/index.mjs?t=' + Date.now());
     db.initSchema();
-    const seeded = db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia')] });
-    assert.equal(seeded.materie, 2);
-    assert.equal(seeded.modelli, 6);
-    assert.equal(db.listMaterie().length, 2);
-    assert.equal(db.listModelli('filosofia').length, 3);
+    const seeded = db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia'), ...core.listModelli('letteratura-italiana')] });
+    assert.equal(seeded.materie, 3);
+    assert.equal(seeded.modelli, 9);
+    assert.equal(db.listMaterie().length, 3);
+    assert.equal(db.listModelli('filosofia').length, 4);
     db.updateMateria('filosofia', { systemPrompt: 'Tono custom.' });
     db.seedCore({ materie: core.listMaterie(), modelli: [] });
     assert.equal(db.getMateria('filosofia').systemPrompt, 'Tono custom.'); // il seed non sovrascrive
@@ -207,12 +208,12 @@ test('API generiche /api/materie /models /cards: CRUD, gate, immagini, PDF', asy
     // Materie e modelli dal seed automatico all'avvio
     let r = await asJson('GET', '/api/materie');
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.materie.map((m) => m.id), ['arte', 'filosofia']);
+    assert.deepEqual(r.body.materie.map((m) => m.id), ['arte', 'filosofia', 'letteratura-italiana']);
     r = await asJson('GET', '/api/models');
     assert.equal(r.status, 400); // subject obbligatorio
     r = await asJson('GET', '/api/models?subject=filosofia');
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.models.map((m) => m.chiave || m.schema.key), ['autore-pensiero', 'confronto-filosofico', 'tematica']);
+    assert.deepEqual(r.body.models.map((m) => m.chiave || m.schema.key), ['autore-pensiero', 'confronto-filosofico', 'opera-filosofica', 'tematica']);
 
     // Nuova scheda: modello ignoto -> 400; ok -> 201; stesso id -> 409
     const modelloId = 'filosofia:autore-pensiero:v1';
@@ -315,7 +316,7 @@ test('Viewer generico: /api/materie /models /cards + immagini (sola lettura)', a
     const db = await import('./noesis-roads-creator/db.mjs?t=v' + suffix);
     const core = await import('./core/index.mjs?t=v' + suffix);
     db.initSchema();
-    db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia')] });
+    db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia'), ...core.listModelli('letteratura-italiana')] });
     // Scheda ready che copre tutti i tipi-sezione
     db.createScheda({ id: 'kant-v', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Kant' });
     db.saveSezione('kant-v', 'vita', { text: 'Vita di Kant.' });
@@ -363,13 +364,13 @@ test('Viewer generico: /api/materie /models /cards + immagini (sola lettura)', a
 
     let res = await fetch(base + '/api/materie');
     assert.equal(res.status, 200);
-    assert.equal((await res.json()).materie.length, 2);
+    assert.equal((await res.json()).materie.length, 3);
 
     res = await fetch(base + '/api/models');
     assert.equal(res.status, 400);
     res = await fetch(base + '/api/models?subject=filosofia');
     assert.equal(res.status, 200);
-    assert.equal((await res.json()).models.length, 3);
+    assert.equal((await res.json()).models.length, 4);
 
     res = await fetch(base + '/api/cards/kant-v');
     assert.equal(res.status, 200);
@@ -501,7 +502,7 @@ test('Viewer PDF: libro d\u2019arte per i 4 tipi + gate (sola lettura)', async (
     const db = await import('./noesis-roads-creator/db.mjs?t=vp' + suffix);
     const core = await import('./core/index.mjs?t=vp' + suffix);
     db.initSchema();
-    db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia')] });
+    db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia'), ...core.listModelli('letteratura-italiana')] });
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
     db.createArtwork({ id: 'w1', title: 'Annunciazione', artist: 'Beato Angelico', imagePath: 'uploads/x.jpg',
       imageData: png, imageMime: 'image/png', imageWidth: 1, imageHeight: 1 });
@@ -786,4 +787,28 @@ test('API wizard: materie/modelli/sezioni/fork + sezioniAttive + preview', async
     if (previousDb === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previousDb;
     await rmDir6(dir, { recursive: true, force: true });
   }
+});
+
+test('pair con immagini: builder PDF usa coppia-a/b (fallback lato-a/b)', async () => {
+  const { buildGenericPdfPayload } = await import('./noesis-roads-creator/server.mjs?t=pair' + Date.now());
+  const schema = {
+    subject: 'filosofia', name: 'Confronto', cover: { eyebrow: 'E', heroRole: 'x' },
+    sections: [{ key: 'coppia', title: 'Coppia', type: 'pair' }],
+  };
+  const mk = (ruoli) => ({
+    titolo: 'C', modello: { schema },
+    sezioni: [{ chiave: 'coppia', corpo: { a: { title: 'A', text: 'ta' }, b: { title: 'B', text: 'tb' } } }],
+    immagini: ruoli.map((r, i) => ({ id: 10 + i, ruolo: r, mime: 'image/png' })),
+  });
+  const ioOf = (ids) => ({ getImmagine: (id) => (ids.includes(id) ? { data: Buffer.from([1]), mime: 'image/png' } : null) });
+  let p = buildGenericPdfPayload(mk(['coppia-a', 'coppia-b']), ioOf([10, 11]));
+  let pair = p.sections.find((s) => s.t === 'pair');
+  assert.ok(pair.a.image && pair.a.image.ref === 'g10');
+  assert.ok(pair.b.image && pair.b.image.ref === 'g11');
+  p = buildGenericPdfPayload(mk(['lato-a']), ioOf([10]));
+  pair = p.sections.find((s) => s.t === 'pair');
+  assert.ok(pair.a.image && pair.b.image === null); // fallback snapshot + assenza
+  p = buildGenericPdfPayload(mk([]), ioOf([]));
+  pair = p.sections.find((s) => s.t === 'pair');
+  assert.equal(pair.a.image, null);
 });

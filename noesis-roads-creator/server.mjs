@@ -42,7 +42,7 @@ const PUBLIC_DIR = join(APP_ROOT, 'public');
 initSchema();
 // Nucleo generico: seed idempotente dal registry dichiarativo (core/models.mjs).
 // Le tabelle legacy restano intatte; materie e modelli vengono (ri)allineati a ogni avvio.
-seedCore({ materie: materieRegistry(), modelli: [...modelliRegistry('arte'), ...modelliRegistry('filosofia')] });
+seedCore({ materie: materieRegistry(), modelli: materieRegistry().flatMap((m) => modelliRegistry(m.id)) });
 
 // ---------- helpers ----------
 function json(res, status, payload) {

@@ -254,9 +254,22 @@ export function buildGenericPdfPayload(full, io = {}) {
     if (row && row.data) byId.set(m.id, ref('g' + m.id, row.data, row.mime));
   }
   const unused = new Set(byId.keys());
+  const isSideRole = (r) => /-(a|b)$/.test(r || '') || /^lato-[ab]$/.test(r || '');
+  const takeExact = (ruolo) => {
+    const pick = metas.find((m) => byId.has(m.id) && unused.has(m.id) && String(m.ruolo || '') === String(ruolo));
+    if (!pick) return null;
+    unused.delete(pick.id);
+    return byId.get(pick.id);
+  };
   const takeImage = (preferRuolo) => {
-    const hit = metas.find((m) => byId.has(m.id) && unused.has(m.id) && String(m.ruolo || '') === String(preferRuolo || ''));
-    const pick = hit || metas.find((m) => byId.has(m.id) && unused.has(m.id));
+    const avail = metas.filter((m) => byId.has(m.id) && unused.has(m.id));
+    let pick = preferRuolo ? avail.find((m) => String(m.ruolo || '') === String(preferRuolo)) : null;
+    if (!pick && preferRuolo) {
+      // Fallback generico: hero/copertina prima, mai i lati di un pair
+      // (meglio nessuna cover che una coppia monca).
+      pick = avail.find((m) => /^(hero|copertina|ritratto|thumb|tavola)/.test(m.ruolo || ''))
+        || avail.find((m) => !isSideRole(m.ruolo)) || null;
+    }
     if (!pick) return null;
     unused.delete(pick.id);
     return byId.get(pick.id);
@@ -300,14 +313,23 @@ export function buildGenericPdfPayload(full, io = {}) {
       out.push({ t: 'kv', items: (corpo.entries || []).map((e) => [e.label || e.term || '', e.value || e.meaning || '']) });
     } else if (def.type === 'pair') {
       const a = corpo.a || {}, b = corpo.b || {};
+      // Immagini lati: ruolo `<chiave>-a/b` (nuove schede) o `lato-a/b` (snapshot arte).
+      // Match esatto: mai rubare immagini altrui per un lato senza immagine.
+      const sideImg = (letter) => takeExact(def.key + '-' + letter) || takeExact('lato-' + letter);
       out.push({ t: 'pair',
-        a: { image: null, caption: a.title || 'A', meta: a.text ? [a.text] : [] },
-        b: { image: null, caption: b.title || 'B', meta: b.text ? [b.text] : [] }
+        a: { image: sideImg('a'), caption: a.title || 'A', meta: a.text ? [a.text] : [] },
+        b: { image: sideImg('b'), caption: b.title || 'B', meta: b.text ? [b.text] : [] }
       });
     }
   }
 
-  if (!coverImage && byId.size) coverImage = byId.values().next().value;
+  if (!coverImage && byId.size) {
+    // Ultima spiaggia, stesse regole: mai i lati di un pair.
+    const pool = metas.filter((m) => byId.has(m.id) && unused.has(m.id));
+    const pick = pool.find((m) => /^(hero|copertina|ritratto|thumb|tavola)/.test(m.ruolo || ''))
+      || pool.find((m) => !isSideRole(m.ruolo));
+    if (pick) { unused.delete(pick.id); coverImage = byId.get(pick.id); }
+  }
   return {
     type: 'scheda',
     eyebrow: (schema.cover && schema.cover.eyebrow) || 'Scheda didattica',

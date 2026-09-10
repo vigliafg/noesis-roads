@@ -2381,6 +2381,7 @@ function cardSectionEditor(s, def) {
   }
   if (def.type === 'works') {
     var w = (b.works || []).length ? '' : '<p class="step-note">Nessuna opera: genera oppure aggiungi a mano.</p>';
+    w += '<p class="step-note">Le immagini si caricano per ruolo nella sezione immagine; senza immagini la galleria resta testuale nel viewer e nel PDF.</p>';
     (b.works || []).forEach(function (o, i) {
       w += '<div class="chapter-row"><input data-cs-f="' + esc(k) + ':works:' + i + ':title" value="' + esc(o.title) + '" placeholder="Titolo" />' +
         '<input data-cs-f="' + esc(k) + ':works:' + i + ':artist" value="' + esc(o.artist) + '" placeholder="Autore" />' +
@@ -2408,10 +2409,21 @@ function cardSectionEditor(s, def) {
     return e + '<button class="btn small" data-cs-add="' + esc(k) + ':entries" style="margin-top:8px">➕ Voce</button>';
   }
   if (def.type === 'pair') {
+    var sideImg = function (letter) {
+      var mine = (s.immagini || []).filter(function (m) { return String(m.ruolo) === k + '-' + letter || String(m.ruolo) === 'lato-' + letter; });
+      if (!mine.length) return '<p class="step-note">Nessuna immagine per questo lato.</p>';
+      return '<div class="sim-grid">' + mine.map(function (m) {
+        return '<div class="sim-card"><img class="sim-thumb" src="' + esc(m.url) + '" alt="" loading="lazy" />' +
+          '<div class="sim-fields"><span class="sim-status">' + esc(m.ruolo) + '</span>' +
+          '<div class="sim-actions"><button class="btn small ghost" data-cs-imgdel="' + m.id + '">✕ Rimuovi</button></div></div></div>';
+      }).join('') + '</div>';
+    };
     var side = function (letter, label) {
       var sd = (b[letter] || {});
       return '<div class="field"><label>Lato ' + label + ' · titolo</label><input data-cs-f="' + esc(k) + ':' + letter + ':title" value="' + esc(sd.title) + '" />' +
-        '<label style="margin-top:8px">Lato ' + label + ' · testo</label><textarea data-cs-f="' + esc(k) + ':' + letter + ':text">' + esc(sd.text) + '</textarea></div>';
+        '<label style="margin-top:8px">Lato ' + label + ' · testo</label><textarea data-cs-f="' + esc(k) + ':' + letter + ':text">' + esc(sd.text) + '</textarea>' +
+        '<label style="margin-top:8px">Lato ' + label + ' · immagine (ruolo: ' + esc(k + '-' + letter) + ')</label><input type="file" id="cs-file-' + esc(k + '-' + letter) + '" accept="image/*" />' +
+        sideImg(letter) + '</div>';
     };
     return '<div class="meta-grid">' + side('a', 'A') + side('b', 'B') + '</div>';
   }
@@ -2551,20 +2563,27 @@ function bindCardStudio(s) {
   appEl.querySelectorAll('[data-cs-save]').forEach(function (btn) {
     btn.onclick = function () { cardSaveSection(s, btn.getAttribute('data-cs-save'), btn); };
   });
-  // upload immagini per ruolo
+  // upload immagini per ruolo (sezioni image + lati delle pair)
+  var uploadDefs = [];
   cardActiveDefs(s).filter(function (d) { return d.type === 'image'; }).forEach(function (def) {
-    var file = document.getElementById('cs-file-' + def.key);
+    uploadDefs.push({ ruolo: def.key, sezKey: def.key });
+  });
+  cardActiveDefs(s).filter(function (d) { return d.type === 'pair'; }).forEach(function (def) {
+    ['a', 'b'].forEach(function (letter) { uploadDefs.push({ ruolo: def.key + '-' + letter, sezKey: def.key }); });
+  });
+  uploadDefs.forEach(function (u) {
+    var file = document.getElementById('cs-file-' + u.ruolo);
     if (file) file.onchange = function () {
       var f = file.files && file.files[0];
       if (!f) return;
       fileToDataUrl(f).then(function (dataUrl) {
-        return post('/api/cards/' + encodeURIComponent(s.id) + '/images', { ruolo: def.key, imageDataUrl: dataUrl });
+        return post('/api/cards/' + encodeURIComponent(s.id) + '/images', { ruolo: u.ruolo, imageDataUrl: dataUrl });
       }).then(function () {
         return api('/api/cards/' + encodeURIComponent(s.id));
       }).then(function (full) {
         s.immagini = full.immagini || [];
         toast('Immagine caricata', true);
-        refreshCardSection(s, def.key);
+        refreshCardSection(s, u.sezKey);
       }).catch(function (e) { toast(e.message); });
     };
   });

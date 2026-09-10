@@ -96,15 +96,20 @@ function SectionBlock({ def, corpo, immagini, fontScale }) {
   if (def.type === 'pair') {
     const a = body.a || {}, b = body.b || {};
     if (!a.title && !a.text && !b.title && !b.text) return null;
-    const side = function (s, label) {
+    const sideImg = function (letter) {
+      return imgFor(def.key + '-' + letter) || imgFor('lato-' + letter) || null;
+    };
+    const side = function (s, label, letter) {
+      const img = sideImg(letter);
       return (
         <div className="overview-col">
+          {img && img.url ? <img src={img.url} alt={s.title || label} loading="lazy" style={{ width: '100%', borderRadius: 10, marginBottom: 8 }} /> : null}
           <h3>{s.title || label}</h3>
           {s.text ? <p style={contentStyle}>{s.text}</p> : null}
         </div>
       );
     };
-    return <div className="overview-grid">{side(a, 'A')}{side(b, 'B')}</div>;
+    return <div className="overview-grid">{side(a, 'A', 'a')}{side(b, 'B', 'b')}</div>;
   }
   if (def.type === 'image') {
     const img = imgFor(def.key) || imgs[0] || null;

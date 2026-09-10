@@ -33,6 +33,10 @@ le presenta; l'hub tiene accesi e configurati i due programmi.
 - **Separazione write/read**: il creator possiede il DB e scrive; il viewer apre la
   **stessa funzione di accesso in `readOnly: true`** (accessor `RO` in
   `noesis-roads-creator/db.mjs`, pattern `openReadonly`) e non tocca mai lo schema.
+- **Dettagli come punti, non hotspot**: nel nucleo generico i "dettagli notevoli"
+  sono voci testuali (`points`), senza regioni né spotlight interattivo — quelli
+  restano esclusiva delle viste legacy arte. Decisione presa dopo audit matrice
+  3×3 (le regioni ha senso solo per l'immagine pittorica).
 
 ---
 
