@@ -32,7 +32,7 @@ import { callModel, VISION_MODEL, TEXT_MODEL, getOpenRouterApiKey,
 import { listMaterie as materieRegistry, listModelli as modelliRegistry } from '../core/models.mjs';
 import { validateBody, isBodyEmpty, isKnownSectionType } from '../core/sectionTypes.mjs';
 import { validateModel } from '../core/modelSpec.mjs';
-import { assembleSectionPrompts } from '../core/prompts.mjs';
+import { assembleSectionPrompts, VERBOSITA, ISTRUZIONE } from '../core/prompts.mjs';
 
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.NOESIS_CREATOR_PORT || process.env.ARTEST_CREATOR_PORT || 18100);
@@ -859,7 +859,7 @@ function handleApi(req, res, urlPath) {
   // ================= Nucleo generico: schede-lezione (Fase 2, additivo) =================
   // Namespace deciso: /api/cards + /api/materie (le legacy /api/subjects arte restano intatte).
   function cardPublic(c) {
-    return { id: c.id, modelloId: c.modelloId, titolo: c.titolo, stato: c.stato, sezioniAttive: c.sezioniAttive, createdAt: c.createdAt, updatedAt: c.updatedAt };
+    return { id: c.id, modelloId: c.modelloId, titolo: c.titolo, stato: c.stato, sezioniAttive: c.sezioniAttive, verbosita: c.verbosita, istruzione: c.istruzione, createdAt: c.createdAt, updatedAt: c.updatedAt };
   }
   function cardFullPublic(id) {
     const full = getSchedaFull(id);
@@ -1111,6 +1111,72 @@ function handleApi(req, res, urlPath) {
     return json(res, 200, { ok: true, model: saved });
   }
 
+  // POST /api/models/adapt — adatta prompt clonati alla nuova materia via LLM.
+  // Due forme: singola { materia, modello: {nome}, sourceMateriaNome?, sections: [...] }
+  // o cumulativa { materia, models: [{ nome, sourceMateriaNome?, sections: [...] }] } (1 chiamata per N modelli).
+  // Output singolo: { sections: [{key,prompt,system}], modelVoice, materiaTone, adapted: true };
+  // cumulativo: { models: [{ nome, sections, modelVoice }], materiaTone, adapted: true }.
+  // Mai bloccante: senza chiave o con risposta inutilizzabile -> 503/502 e il client tiene il verbatim.
+  if (method === 'POST' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'models' && parts[2] === 'adapt') {
+    return readBody(req).then(async (input) => {
+      const apiKey = getOpenRouterApiKey();
+      if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata: tengo i testi originali');
+      const matNome = String((input.materia && input.materia.nome) || '').trim();
+      if (!matNome) return err(res, 400, 'materia.nome obbligatorio');
+      const batch = Array.isArray(input.models) && input.models.length
+        ? input.models.map((m) => ({ nome: String(m.nome || '').trim(), sourceMateriaNome: String(m.sourceMateriaNome || ''), sections: Array.isArray(m.sections) ? m.sections : [] })).filter((m) => m.nome && m.sections.length)
+        : null;
+      const single = !batch && String((input.modello && input.modello.nome) || '').trim() && Array.isArray(input.sections) && input.sections.length
+        ? [{ nome: String(input.modello.nome).trim(), sourceMateriaNome: String(input.sourceMateriaNome || ''), sections: input.sections }]
+        : null;
+      const models = batch || single;
+      if (!models || !models.length) return err(res, 400, 'modello.nome e sections[] obbligatori (o models[] non vuoto)');
+      const system = 'Sei un instructional designer italiano. Riscrivi istruzioni di generazione per schede didattiche, adattandole a una nuova materia. Rispondi SOLO con JSON valido, senza commenti.';
+      const user = JSON.stringify({
+        nuovaMateria: matNome,
+        descrizioneMateria: String((input.materia && input.materia.descrizione) || ''),
+        vincoli: 'Stessa struttura: non cambiare numero, chiavi, titoli e tipi delle sezioni. Togli ogni riferimento alle materie di origine (nomi di discipline, esempi, lessico specifico). Italiano didattico chiaro. I prompt restano istruzioni operative brevi (1-3 frasi con vincoli di lunghezza quando presenti). Il campo system resta vuoto salvo vincoli extra reali. Rispondi con un oggetto "models" nello stesso ordine, con gli stessi nomi.',
+        modelli: models.map((m) => ({
+          nome: m.nome,
+          materiaOrigine: m.sourceMateriaNome || '(sconosciuta)',
+          sezioni: m.sections.map((s) => ({ key: s.key, title: s.title, type: s.type, prompt: s.prompt || '', system: s.system || '' }))
+        })),
+        formatoRisposta: { models: [{ nome: '...', sections: [{ key: '...', prompt: '...', system: '...' }], modelVoice: 'voce del modello in una frase' }], materiaTone: 'system prompt di materia in una frase' }
+      });
+      let raw;
+      try {
+        raw = await callModel(TEXT_MODEL, [{ type: 'text', text: user }], apiKey, globalThis.fetch, { system, maxTokens: 12000 });
+      } catch (e) { return err(res, 502, 'Adattamento non riuscito: tengo i testi originali (' + (e.message || e) + ')'); }
+      const data = raw && raw.data;
+      const adaptedModels = Array.isArray(data && data.models) ? data.models : null;
+      if (!adaptedModels) return err(res, 502, 'Adattamento non riuscito: risposta inutilizzabile, tengo i testi originali');
+      const out = models.map((m) => {
+        const found = adaptedModels.find((a) => a && String(a.nome || '') === m.nome) || null;
+        const byKey = {};
+        m.sections.forEach((s) => { byKey[String(s.key)] = { prompt: String(s.prompt || ''), system: String(s.system || '') }; });
+        if (found && Array.isArray(found.sections)) {
+          found.sections.forEach((a) => {
+            if (a && byKey[String(a.key)] !== undefined) {
+              if (typeof a.prompt === 'string' && a.prompt.trim()) byKey[String(a.key)].prompt = a.prompt.trim();
+              if (typeof a.system === 'string') byKey[String(a.key)].system = a.system.trim();
+            }
+          });
+        }
+        return {
+          nome: m.nome,
+          ok: !!found,
+          sections: Object.keys(byKey).map((k) => ({ key: k, prompt: byKey[k].prompt, system: byKey[k].system })),
+          modelVoice: (found && typeof found.modelVoice === 'string') ? found.modelVoice.trim() : ''
+        };
+      });
+      if (single) {
+        const o = out[0];
+        return json(res, 200, { sections: o.sections, modelVoice: o.modelVoice, materiaTone: typeof data.materiaTone === 'string' ? data.materiaTone.trim() : '', adapted: o.ok });
+      }
+      return json(res, 200, { models: out, materiaTone: typeof data.materiaTone === 'string' ? data.materiaTone.trim() : '', adapted: out.some((o) => o.ok) });
+    }).catch((e) => err(res, 500, e.message));
+  }
+
   // GET /api/cards?modello=&stato= — elenco schede-lezione
   if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'cards') {
     const q = new URL(req.url, 'http://localhost').searchParams;
@@ -1118,8 +1184,9 @@ function handleApi(req, res, urlPath) {
     return json(res, 200, { cards: cards.map(cardPublic) });
   }
 
-  // POST /api/cards { modelloId, titolo?, id?, sezioniAttive? } — nuova scheda-lezione
+  // POST /api/cards { modelloId, titolo?, id?, sezioniAttive?, verbosita?, istruzione? }
   // sezioniAttive: sottoinsieme di chiavi (le required sempre incluse); null = tutte.
+  // verbosita: essenziale|standard|approfondita · istruzione: primaria|secondaria|universita.
   if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'cards') {
     return readBody(req).then((input) => {
       if (!input.modelloId) return err(res, 400, 'modelloId obbligatorio');
@@ -1134,8 +1201,12 @@ function handleApi(req, res, urlPath) {
         const attErrs = checkAttive(modello, attive);
         if (attErrs.length) return err(res, 400, attErrs.join('; '));
       }
+      const verbErr = input.verbosita !== undefined && !VERBOSITA.includes(String(input.verbosita).trim().toLowerCase());
+      if (verbErr) return err(res, 400, 'verbosita non valida (essenziale|standard|approfondita)');
+      const istrErr = input.istruzione !== undefined && !ISTRUZIONE.includes(String(input.istruzione).trim().toLowerCase());
+      if (istrErr) return err(res, 400, 'istruzione non valida (primaria|secondaria|universita)');
       try {
-        const created = createScheda({ id: input.id || null, modelloId: input.modelloId, titolo: input.titolo || '', sezioniAttive: attive });
+        const created = createScheda({ id: input.id || null, modelloId: input.modelloId, titolo: input.titolo || '', sezioniAttive: attive, verbosita: input.verbosita, istruzione: input.istruzione });
         return json(res, 201, { card: cardPublic(created) });
       } catch (e) {
         return err(res, String(e.message || '').includes('già una scheda') ? 409 : 400, e.message);
@@ -1150,14 +1221,24 @@ function handleApi(req, res, urlPath) {
     return json(res, 200, full);
   }
 
-  // PATCH /api/cards/:id { titolo?, sezioniAttive? } — revisione metadati
+  // PATCH /api/cards/:id { titolo?, sezioniAttive?, verbosita?, istruzione? }
   // sezioniAttive modificabile solo in draft (mai su ready pubblicata).
+  // I livelli si cambiano sempre: le sezioni già generate con altri livelli
+  // diventano stale e vanno rigenerate (gate bloccante, vedi approve).
   if (method === 'PATCH' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'cards') {
     return readBody(req).then((input) => {
       const current = getScheda(parts[2]);
       if (!current) return err(res, 404, 'Scheda non trovata');
       const patch = {};
       if (input.titolo !== undefined) patch.titolo = String(input.titolo);
+      if (input.verbosita !== undefined) {
+        if (!VERBOSITA.includes(String(input.verbosita).trim().toLowerCase())) return err(res, 400, 'verbosita non valida (essenziale|standard|approfondita)');
+        patch.verbosita = input.verbosita;
+      }
+      if (input.istruzione !== undefined) {
+        if (!ISTRUZIONE.includes(String(input.istruzione).trim().toLowerCase())) return err(res, 400, 'istruzione non valida (primaria|secondaria|universita)');
+        patch.istruzione = input.istruzione;
+      }
       if (input.sezioniAttive !== undefined) {
         if (current.stato === 'ready') return err(res, 400, 'Scheda già pronta: le sezioni attive non si cambiano su ready');
         if (input.sezioniAttive === null) {
@@ -1212,19 +1293,19 @@ function handleApi(req, res, urlPath) {
     if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
     return readBody(req).then(async (input) => {
       const materia = getMateria(modello.materiaId);
-      const { system, user, version } = assembleSectionPrompts({ materia, modello: modello.schema, sezione: def, titoloScheda: scheda.titolo, livello: String((input && input.livello) || '') });
+      const { system, user, version } = assembleSectionPrompts({ materia, modello: modello.schema, sezione: def, titoloScheda: scheda.titolo, livello: String((input && input.livello) || ''), verbosita: scheda.verbosita, istruzione: scheda.istruzione });
       try {
         const raw = await callModel(TEXT_MODEL, [{ type: 'text', text: user }], apiKey, undefined, { system });
         const corpo = normalizeSectionBody(def.type, raw.data);
         const warnings = validateBody(def.type, corpo);
         if (isBodyEmpty(def.type, corpo)) warnings.push('sezione vuota: il modello non ha restituito contenuti, riprova la generazione');
-        const saved = saveSezione(parts[2], parts[4], corpo, { model: modello.id, promptVersion: version });
+        const saved = saveSezione(parts[2], parts[4], corpo, { model: modello.id, promptVersion: version, verbosita: scheda.verbosita, istruzione: scheda.istruzione });
         return json(res, 200, { section: saved, warnings });
       } catch (e) { console.error('ERR genSection:', e); return err(res, 500, e.message); }
     }).catch(e => err(res, 400, e.message));
   }
 
-  // GET /api/prompts/preview?modello=<id>&sezione=<key>[&titolo=][&livello=] — system+user assemblati (debug)
+  // GET /api/prompts/preview?modello=<id>&sezione=<key>[&titolo=][&livello=][&verbosita=][&istruzione=]
   if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'prompts' && parts[2] === 'preview') {
     const q = new URL(req.url, 'http://localhost').searchParams;
     const modello = getModello(q.get('modello') || '');
@@ -1232,7 +1313,7 @@ function handleApi(req, res, urlPath) {
     const def = (modello.schema.sections || []).find((s) => s.key === (q.get('sezione') || ''));
     if (!def) return err(res, 404, 'Sezione sconosciuta per questo modello: ' + (q.get('sezione') || ''));
     const materia = getMateria(modello.materiaId);
-    return json(res, 200, assembleSectionPrompts({ materia, modello: modello.schema, sezione: def, titoloScheda: q.get('titolo') || '', livello: q.get('livello') || '' }));
+    return json(res, 200, assembleSectionPrompts({ materia, modello: modello.schema, sezione: def, titoloScheda: q.get('titolo') || '', livello: q.get('livello') || '', verbosita: q.get('verbosita') || undefined, istruzione: q.get('istruzione') || undefined }));
   }
 
   // POST /api/cards/:id/approve — ready (+ gate required come il legacy)
@@ -1240,7 +1321,12 @@ function handleApi(req, res, urlPath) {
     const scheda = getScheda(parts[2]);
     if (!scheda) return err(res, 404, 'Scheda non trovata');
     const result = approveScheda(parts[2]);
-    if (!result.ok) return err(res, 400, 'Genera e salva prima i contenuti: sezioni mancanti: ' + result.missing.join(', '));
+    if (!result.ok) {
+      const staleMsg = (result.stale && result.stale.length)
+        ? ' Rigenera con i livelli attuali: ' + result.stale.join(', ')
+        : '';
+      return err(res, 400, 'Genera e salva prima i contenuti: sezioni mancanti: ' + result.missing.join(', ') + '.' + staleMsg);
+    }
     return json(res, 200, { ok: true, status: 'ready', card: cardPublic(result.scheda) });
   }
 

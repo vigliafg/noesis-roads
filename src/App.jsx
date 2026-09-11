@@ -17,24 +17,24 @@ function App() {
   const [openingId, setOpeningId] = React.useState(null);
   const [openError, setOpenError] = React.useState(null);
 
-  // La collezione arriva dal DB di noesis-roads-creator: dipinti, soggetti, confronti
-  // e schede-lezione generiche pubblicati (stato "ready"). Se non ci sono schede
-  // (o il DB non è raggiungibile) si usa la demo inclusa nella pagina (solo dipinti).
+  // La collezione arriva dal DB di noesis-roads-creator: schede-lezione
+  // generiche pubblicate (stato "ready"), di qualunque materia. I tipi storici
+  // (dipinti, soggetti, confronti) restano supportati se presenti. Se non ci
+  // sono schede (o il DB non è raggiungibile) si mostra uno stato vuoto neutro.
   React.useEffect(() => {
     let cancelled = false;
     fetch('/api/library')
       .then((response) => response.json())
       .then((payload) => {
         if (cancelled) return;
-        const demo = (window.APP_DATA && window.APP_DATA.artworks) ? window.APP_DATA.artworks : [];
         const published = [].concat(payload.artworks || [], payload.subjects || [], payload.comparisons || [], payload.cards || []);
-        const list = (payload && published.length) ? published : demo;
-        setCards(list);
+        // Niente demo arte di ripiego: a catalogo vuoto si mostra uno stato vuoto neutro.
+        setCards(published);
         setLibraryStatus('ready');
       })
       .catch(() => {
         if (cancelled) return;
-        setCards(window.APP_DATA && window.APP_DATA.artworks ? window.APP_DATA.artworks : []);
+        setCards([]);
         setLibraryStatus('ready');
       });
     return function () { cancelled = true; };
@@ -107,7 +107,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      {showCatalog && <header className="site-header"><a href="#top" className="brand" onClick={(event) => { event.preventDefault(); backHome(); }}><span className="brand-mark"><i></i><i></i><i></i></span><span>leggi l’<strong>opera</strong></span></a><nav><a href="#catalogo">La collezione</a><a href="#metodo">Come funziona</a></nav><div className="header-actions"><button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all'hub di Noesis Roads"><span>←</span> Hub</button></div></header>}
+      {showCatalog && <header className="site-header"><a href="#top" className="brand" onClick={(event) => { event.preventDefault(); backHome(); }}><span className="brand-mark"><i></i><i></i><i></i></span><span>Noesis <strong>Roads</strong></span></a><nav><a href="#catalogo">Il catalogo</a><a href="#metodo">Come funziona</a></nav><div className="header-actions"><button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all'hub di Noesis Roads"><span>←</span> Hub</button></div></header>}
       {showCatalog && libraryStatus === 'loading' && (
         <main className="catalog-page"><section className="catalog-section" style={{ textAlign: 'center', paddingTop: 120 }}><div className="loading-orbit" style={{ margin: '0 auto 22px' }}><span></span><span></span><span></span></div><h2 style={{ fontFamily: 'Playfair Display, Georgia, serif' }}>Carico la collezione…</h2></section></main>
       )}
@@ -126,7 +126,7 @@ function App() {
             <Icon name="info" size={22} />
             <h3>Impossibile aprire la scheda</h3>
             <p>{openError}</p>
-            <button className="secondary-button" onClick={backHome}>Torna alla collezione</button>
+            <button className="secondary-button" onClick={backHome}>Torna al catalogo</button>
           </div>
         </section></main>
       )}
@@ -134,7 +134,7 @@ function App() {
       {activeSubject && <SubjectView subject={activeSubject} onBack={backHome} />}
       {activeComparison && <ComparisonView comparison={activeComparison} onBack={backHome} />}
       {activeScheda && <GenericCardView card={activeScheda} onBack={backHome} />}
-      {showCatalog && <footer className="site-footer" id="metodo"><div className="footer-brand"><span className="brand-mark"><i></i><i></i><i></i></span><span>leggi l’<strong>opera</strong></span></div><p>Un invito a guardare con più attenzione.</p><div className="footer-meta"><span>Progetto educativo · 2026</span><span>Realizzato per imparare dall’arte</span></div></footer>}
+      {showCatalog && <footer className="site-footer" id="metodo"><div className="footer-brand"><span className="brand-mark"><i></i><i></i><i></i></span><span>Noesis <strong>Roads</strong></span></div><p>Un invito a esplorare ogni materia con più attenzione.</p><div className="footer-meta"><span>Progetto educativo · 2026</span><span>Schede didattiche per ogni materia</span></div></footer>}
     </div>
   );
 }

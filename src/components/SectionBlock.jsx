@@ -45,13 +45,15 @@ function SectionBlock({ def, corpo, immagini, fontScale }) {
       <div className="sim-carousel">
         <div className="sim-track"><div className="sim-track-inner">
           {works.map(function (work, index) {
+            const byline = work.artist || work.author || '';
+            const place = work.museum || work.place || '';
             return (
               <figure className="sim-slide" key={String(work.title) + '-' + index}>
                 <GenericWorkThumb work={work} />
                 <figcaption>
                   <strong>{work.title}</strong>
-                  {work.artist ? <span>{work.artist}{work.date ? ' · ' + work.date : ''}</span> : null}
-                  {work.museum ? <small>{work.museum}</small> : null}
+                  {byline ? <span>{byline}{work.date ? ' · ' + work.date : ''}</span> : null}
+                  {place ? <small>{place}</small> : null}
                   {work.caption ? <p style={{ fontSize: (11 * (fontScale || 1)) + 'px', lineHeight: 1.5 }}>{work.caption}</p> : null}
                 </figcaption>
               </figure>

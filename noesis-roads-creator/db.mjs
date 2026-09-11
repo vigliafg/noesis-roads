@@ -243,6 +243,8 @@ export function initSchema() {
       titolo TEXT NOT NULL DEFAULT '',
       stato TEXT NOT NULL DEFAULT 'draft' CHECK (stato IN ('draft','ready')),
       sezioni_attive TEXT NOT NULL DEFAULT '',
+      verbosita TEXT NOT NULL DEFAULT 'standard',
+      istruzione TEXT NOT NULL DEFAULT 'secondaria',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -255,6 +257,8 @@ export function initSchema() {
       ordine INTEGER NOT NULL DEFAULT 0,
       model TEXT NOT NULL DEFAULT '',
       prompt_version TEXT NOT NULL DEFAULT '',
+      verbosita TEXT NOT NULL DEFAULT '',
+      istruzione TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(scheda_id, chiave)
     );
@@ -292,6 +296,13 @@ export function initSchema() {
   const zcols = getDb().prepare('PRAGMA table_info(sezioni)').all().map(c => c.name);
   if (!zcols.includes('model')) db.exec("ALTER TABLE sezioni ADD COLUMN model TEXT NOT NULL DEFAULT ''");
   if (!zcols.includes('prompt_version')) db.exec("ALTER TABLE sezioni ADD COLUMN prompt_version TEXT NOT NULL DEFAULT ''");
+  if (!zcols.includes('verbosita')) db.exec("ALTER TABLE sezioni ADD COLUMN verbosita TEXT NOT NULL DEFAULT ''");
+  if (!zcols.includes('istruzione')) db.exec("ALTER TABLE sezioni ADD COLUMN istruzione TEXT NOT NULL DEFAULT ''");
+
+  // migrazione: livelli di generazione per scheda (default = comportamento attuale)
+  const lcols = getDb().prepare('PRAGMA table_info(schede_lezione)').all().map(c => c.name);
+  if (!lcols.includes('verbosita')) db.exec("ALTER TABLE schede_lezione ADD COLUMN verbosita TEXT NOT NULL DEFAULT 'standard'");
+  if (!lcols.includes('istruzione')) db.exec("ALTER TABLE schede_lezione ADD COLUMN istruzione TEXT NOT NULL DEFAULT 'secondaria'");
 
   // backfill: opere esistenti (solo file su disco) -> carica il BLOB una tantum
   const missing = getDb().prepare("SELECT id, image_path FROM artworks WHERE image_data IS NULL AND image_path != ''").all();
@@ -846,7 +857,9 @@ function rowToScheda(row) {
   if (!row) return null;
   let attive = null;
   try { const v = JSON.parse(row.sezioni_attive || 'null'); if (Array.isArray(v)) attive = v; } catch { attive = null; }
-  return { id: row.id, modelloId: row.modello_id, titolo: row.titolo, stato: row.stato, sezioniAttive: attive, createdAt: row.created_at, updatedAt: row.updated_at };
+  const verb = ['essenziale', 'standard', 'approfondita'].includes(row.verbosita) ? row.verbosita : 'standard';
+  const istr = ['primaria', 'secondaria', 'universita'].includes(row.istruzione) ? row.istruzione : 'secondaria';
+  return { id: row.id, modelloId: row.modello_id, titolo: row.titolo, stato: row.stato, sezioniAttive: attive, verbosita: verb, istruzione: istr, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 function encodeAttive(v) {
   if (v === undefined || v === null) return null; // null = non toccare / tutte
@@ -941,14 +954,21 @@ export function seedCore({ materie = [], modelli = [] } = {}) {
   return { materie: listMaterie().length, modelli: listModelli().length };
 }
 
-export function createScheda({ id = null, modelloId, titolo = '', sezioniAttive = null }) {
+function normLivello(v, allowed, fallback) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return allowed.includes(s) ? s : fallback;
+}
+export function normVerbosita(v) { return normLivello(v, ['essenziale', 'standard', 'approfondita'], 'standard'); }
+export function normIstruzione(v) { return normLivello(v, ['primaria', 'secondaria', 'universita'], 'secondaria'); }
+
+export function createScheda({ id = null, modelloId, titolo = '', sezioniAttive = null, verbosita, istruzione }) {
   const modello = getModello(modelloId);
   if (!modello) throw new Error(`modello sconosciuto: ${modelloId}`);
   const schedaId = id || ('scheda-' + Date.now().toString(36));
   if (getScheda(schedaId)) throw new Error(`esiste già una scheda con id ${schedaId}`);
   const att = encodeAttive(sezioniAttive);
-  getDb().prepare(`INSERT INTO schede_lezione (id, modello_id, titolo, stato, sezioni_attive, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?, ?)`)
-    .run(schedaId, modelloId, titolo || '', att === null ? '' : att, now(), now());
+  getDb().prepare(`INSERT INTO schede_lezione (id, modello_id, titolo, stato, sezioni_attive, verbosita, istruzione, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)`)
+    .run(schedaId, modelloId, titolo || '', att === null ? '' : att, normVerbosita(verbosita), normIstruzione(istruzione), now(), now());
   return getScheda(schedaId);
 }
 export function getScheda(id, conn) {
@@ -966,14 +986,16 @@ export function updateScheda(id, patch = {}) {
   const current = getScheda(id);
   if (!current) return null;
   const titolo = patch.titolo !== undefined ? String(patch.titolo) : current.titolo;
+  const verb = patch.verbosita !== undefined ? normVerbosita(patch.verbosita) : current.verbosita;
+  const istr = patch.istruzione !== undefined ? normIstruzione(patch.istruzione) : current.istruzione;
   let att = null;
   let attTouched = false;
   if (patch.sezioniAttive !== undefined) { att = encodeAttive(patch.sezioniAttive); attTouched = true; }
   if (attTouched) {
-    getDb().prepare('UPDATE schede_lezione SET titolo = ?, sezioni_attive = ?, updated_at = ? WHERE id = ?')
-      .run(titolo, att === null ? '' : att, now(), id);
+    getDb().prepare('UPDATE schede_lezione SET titolo = ?, sezioni_attive = ?, verbosita = ?, istruzione = ?, updated_at = ? WHERE id = ?')
+      .run(titolo, att === null ? '' : att, verb, istr, now(), id);
   } else {
-    getDb().prepare('UPDATE schede_lezione SET titolo = ?, updated_at = ? WHERE id = ?').run(titolo, now(), id);
+    getDb().prepare('UPDATE schede_lezione SET titolo = ?, verbosita = ?, istruzione = ?, updated_at = ? WHERE id = ?').run(titolo, verb, istr, now(), id);
   }
   return getScheda(id);
 }
@@ -986,8 +1008,10 @@ function parseCorpo(text) {
 }
 function rowToSezione(row) {
   if (!row) return null;
-  return { id: row.id, schedaId: row.scheda_id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine, model: row.model || '', promptVersion: row.prompt_version || '', updatedAt: row.updated_at };
+  return { id: row.id, schedaId: row.scheda_id, chiave: row.chiave, titolo: row.titolo, corpo: parseCorpo(row.corpo_json), ordine: row.ordine, model: row.model || '', promptVersion: row.prompt_version || '', verbosita: row.verbosita || '', istruzione: row.istruzione || '', updatedAt: row.updated_at };
 }
+// meta {model, promptVersion, verbosita, istruzione}: solo la generate li passa.
+// Il salvataggio manuale preserva i timbri esistenti (contenuto umano = sempre valido).
 export function saveSezione(schedaId, chiave, corpo, meta = {}) {
   const scheda = getScheda(schedaId);
   if (!scheda) throw new Error(`scheda sconosciuta: ${schedaId}`);
@@ -1001,9 +1025,12 @@ export function saveSezione(schedaId, chiave, corpo, meta = {}) {
   }
   const corpoObj = (corpo && typeof corpo === 'object') ? corpo : parseCorpo(corpo);
   const ordine = Math.max(0, modello.schema.sections.findIndex((s) => s.key === chiave));
-  getDb().prepare(`INSERT INTO sezioni (scheda_id, chiave, titolo, corpo_json, ordine, model, prompt_version, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(scheda_id, chiave) DO UPDATE SET titolo=excluded.titolo, corpo_json=excluded.corpo_json, ordine=excluded.ordine, model=excluded.model, prompt_version=excluded.prompt_version, updated_at=excluded.updated_at`)
-    .run(schedaId, chiave, def.title || '', JSON.stringify(corpoObj), ordine, String(meta.model || ''), String(meta.promptVersion || ''), now());
+  const prev = getSezione(schedaId, chiave);
+  const hasStamps = meta && (meta.model !== undefined || meta.promptVersion !== undefined || meta.verbosita !== undefined || meta.istruzione !== undefined);
+  const stamps = hasStamps ? meta : { model: prev?.model || '', promptVersion: prev?.promptVersion || '', verbosita: prev?.verbosita || '', istruzione: prev?.istruzione || '' };
+  getDb().prepare(`INSERT INTO sezioni (scheda_id, chiave, titolo, corpo_json, ordine, model, prompt_version, verbosita, istruzione, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(scheda_id, chiave) DO UPDATE SET titolo=excluded.titolo, corpo_json=excluded.corpo_json, ordine=excluded.ordine, model=excluded.model, prompt_version=excluded.prompt_version, verbosita=excluded.verbosita, istruzione=excluded.istruzione, updated_at=excluded.updated_at`)
+    .run(schedaId, chiave, def.title || '', JSON.stringify(corpoObj), ordine, String(stamps.model || ''), String(stamps.promptVersion || ''), String(stamps.verbosita || ''), String(stamps.istruzione || ''), now());
   return getSezione(schedaId, chiave);
 }
 export function getSezione(schedaId, chiave, conn) {
@@ -1029,23 +1056,33 @@ function corpoVuoto(tipo, corpo, haImmagini) {
   return false;
 }
 
-// Gate "Genera e salva prima i contenuti": ready solo a sezioni required piene.
-// Ritorna { ok, missing: [chiavi] }; se ok, passa la scheda a ready.
+// Gate "Genera e salva prima i contenuti": ready solo a sezioni required piene e fresche.
+// Ritorna { ok, missing: [chiavi], stale: [chiavi] }; se ok, passa la scheda a ready.
 // Conta solo le required comprese in sezioni_attive (null = tutte).
+// Stale = generata con livelli diversi da quelli attuali (timbro non vuoto e diverso);
+// i contenuti manuali (timbro vuoto) valgono sempre.
 export function approveScheda(id) {
   const scheda = getScheda(id);
   if (!scheda) return null;
   const modello = getModello(scheda.modelloId);
   const sections = (modello && Array.isArray(modello.schema.sections)) ? modello.schema.sections : [];
   const attive = scheda.sezioniAttive;
-  const salvate = new Map(listSezioni(id).map((s) => [s.chiave, s.corpo]));
+  const salvate = new Map(listSezioni(id).map((s) => [s.chiave, s]));
   const nImmagini = getDb().prepare('SELECT COUNT(*) AS c FROM immagini WHERE scheda_id = ?').get(id).c;
-  const missing = sections
-    .filter((s) => s.required && (!attive || attive.includes(s.key)))
-    .filter((s) => corpoVuoto(s.type, salvate.get(s.key), nImmagini > 0)).map((s) => s.key);
-  if (missing.length) return { ok: false, missing };
+  const missing = [];
+  const stale = [];
+  for (const s of sections) {
+    if (!s.required || (attive && !attive.includes(s.key))) continue;
+    const row = salvate.get(s.key);
+    if (corpoVuoto(s.type, row?.corpo, nImmagini > 0)) { missing.push(s.key); continue; }
+    if (row && (row.verbosita || row.istruzione) && (row.verbosita !== scheda.verbosita || row.istruzione !== scheda.istruzione)) {
+      missing.push(s.key);
+      stale.push(s.key);
+    }
+  }
+  if (missing.length) return { ok: false, missing, stale };
   getDb().prepare("UPDATE schede_lezione SET stato = 'ready', updated_at = ? WHERE id = ?").run(now(), id);
-  return { ok: true, missing: [], scheda: getScheda(id) };
+  return { ok: true, missing: [], stale: [], scheda: getScheda(id) };
 }
 
 export function addImmagine(schedaId, ruolo, dati, mime = 'image/jpeg') {

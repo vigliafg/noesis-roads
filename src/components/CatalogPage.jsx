@@ -22,11 +22,15 @@ function SchedaCard({ card, onOpen }) {
   return (
     <button className="artwork-card subject-card" onClick={() => onOpen(card)} aria-label={'Apri ' + card.title}>
       <div className="card-image-wrap subject-card-fill">
-        <div className="subject-card-inner">
-          <span className="subject-ico">{String(card.title || 'S').charAt(0)}</span>
-          <strong>{card.title}</strong>
-          <small>{card.subtitle || 'Scheda didattica'}</small>
-        </div>
+        {card.image ? (
+          <img src={card.image} alt={card.title} className="card-image" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.style.display = 'none'; }} />
+        ) : (
+          <div className="subject-card-inner">
+            <span className="subject-ico">{String(card.title || 'S').charAt(0)}</span>
+            <strong>{card.title}</strong>
+            <small>{card.subtitle || 'Scheda didattica'}</small>
+          </div>
+        )}
         <span className="card-arrow"><Icon name="arrow" size={18} /></span>
       </div>
       <div className="card-copy">
@@ -64,7 +68,7 @@ function TypeSectionHead({ title, count }) {
     <div className="type-section-head">
       <div>
         <h3 className="type-title">{title}</h3>
-        <p className="type-desc">{count === 1 ? 'Una scheda nella collezione' : count + ' schede nella collezione'}</p>
+        <p className="type-desc">{count === 1 ? 'Una scheda nel catalogo' : count + ' schede nel catalogo'}</p>
       </div>
       <span className="type-tag">{count}</span>
     </div>
@@ -95,7 +99,7 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
   const pillIds = (knownIds.length ? knownIds : schedaMaterie)
     .filter(function (id) { return !schedaMaterie.length || schedaMaterie.includes(id); });
   const materiaTabs = [['tutte', 'Tutte le materie']].concat(pillIds.map(function (id) { return [id, materiaName(id)]; }));
-  const hero = (cards || [])[0] || null;
+  const hero = (cards || []).find(function (c) { return c.image; }) || null;
   const needle = query.toLowerCase();
 
   // Tre sezioni logiche della collezione, una per tipo di scheda.
@@ -143,23 +147,23 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
     <main className="catalog-page">
       <section className="hero-section">
         <div className="hero-copy">
-          <div className="hero-kicker"><span></span> Un modo nuovo di guardare</div>
-          <h1>Ogni dettaglio<br /><em>racconta</em> una storia.</h1>
-          <p>Esplora le opere d’arte attraverso ciò che spesso passa inosservato. Clicca, osserva, fai domande.</p>
+          <div className="hero-kicker"><span></span> Schede didattiche per ogni materia</div>
+          <h1>Ogni argomento<br /><em>racconta</em> una storia.</h1>
+          <p>Esplora autori, opere, temi e confronti di ogni materia. Apri una scheda, leggi, fai domande.</p>
           <div className="hero-actions"><a href="#catalogo" className="primary-button">Inizia a esplorare <Icon name="arrow" size={18} /></a><span className="hero-note"><Icon name="sparkle" size={15} /> Guidato dall’intelligenza artificiale</span></div>
         </div>
         {hero ? (
           <div className="hero-art">
             <div className="hero-frame"><img src={hero.image} alt={(hero.artist ? hero.artist + ', ' : '') + hero.title} onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = hero.fallbackImage; }} /><span className="hero-spot hero-spot-one"></span><span className="hero-spot hero-spot-two"></span></div>
-            <div className="hero-caption"><span>01</span><span>{hero.title} · {hero.artist || hero.period}</span></div>
+            <div className="hero-caption"><span>01</span><span>{hero.title}{hero.artist ? ' · ' + hero.artist : (hero.subtitle || hero.period ? ' · ' + (hero.subtitle || hero.period) : '')}</span></div>
           </div>
         ) : null}
-        <div className="hero-scribble">guarda<br />più da vicino</div>
+        <div className="hero-scribble">leggi<br />più a fondo</div>
       </section>
 
       <section className="catalog-section" id="catalogo">
-        <div className="section-heading"><div><span className="eyebrow">La collezione</span><h2>Inizia da un’opera.</h2></div><p>Schede didattiche: dipinti, soggetti nella storia dell’arte, confronti “faccia a faccia” e schede per materia.</p></div>
-        <div className="catalog-tools"><label className="search-field"><Icon name="search" size={18} /><span className="sr-only">Cerca nell’elenco</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cerca artista, opera o soggetto…" /></label></div>
+        <div className="section-heading"><div><span className="eyebrow">Il catalogo</span><h2>Inizia da una scheda.</h2></div><p>Schede didattiche per materia: autori, opere, temi e confronti.</p></div>
+        <div className="catalog-tools"><label className="search-field"><Icon name="search" size={18} /><span className="sr-only">Cerca nell’elenco</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cerca titolo, autore o argomento…" /></label></div>
         <div className="catalog-tabs" role="tablist" aria-label="Filtra la collezione per tipo">
           {[
             ['Tutte', (cards || []).length],
@@ -167,7 +171,7 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
             ['Soggetti', sections[1].items.length],
             ['Confronti', sections[2].items.length],
             ['Schede', sections[3].items.length]
-          ].map(function (tab) {
+          ].filter(function (tab) { return tab[0] === 'Tutte' || tab[1] > 0; }).map(function (tab) {
             return (
               <button key={tab[0]} type="button" role="tab" aria-selected={type === tab[0]} className={'catalog-tab' + (type === tab[0] ? ' active' : '')} onClick={() => setType(tab[0])}>
                 {tab[0]}<span className="tab-count">{tab[1]}</span>
@@ -197,7 +201,8 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
             </div>
           );
         })}
-        {total === 0 && <div className="catalog-empty"><Icon name="search" size={24} /><h3>Nessuna scheda trovata</h3><p>Prova a cambiare la ricerca o il filtro.</p></div>}
+        {total === 0 && (cards || []).length === 0 && <div className="catalog-empty"><Icon name="search" size={24} /><h3>Nessun contenuto pubblicato</h3><p>Crea e approva schede da noesis-roads-creator per vederle qui.</p></div>}
+        {total === 0 && (cards || []).length > 0 && <div className="catalog-empty"><Icon name="search" size={24} /><h3>Nessuna scheda trovata</h3><p>Prova a cambiare la ricerca o il filtro.</p></div>}
       </section>
     </main>
   );

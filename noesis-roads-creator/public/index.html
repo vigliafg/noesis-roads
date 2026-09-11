@@ -208,6 +208,12 @@ h1,h2,h3{font-family:'Playfair Display',Georgia,serif;letter-spacing:-.04em}
 .home-tab.active{border-color:var(--coral);background:var(--coral);color:#fff}
 .home-tab .tab-count{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--paper);color:var(--muted);font-size:10px;display:inline-flex;align-items:center;justify-content:center}
 .home-tab.active .tab-count{background:rgba(255,255,255,.25);color:#fff}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:30px;overflow:hidden;background:var(--white)}
+.seg button{border:0;background:transparent;padding:8px 13px;font-size:11px;font-weight:700;color:var(--muted);cursor:pointer;font-family:inherit}
+.seg button.on{background:var(--ink);color:#fff}
+.seg button:disabled{opacity:.45;cursor:default}
+.lvl-badge{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;border:1px solid var(--line);border-radius:20px;padding:3px 8px;color:var(--muted);background:var(--white);margin-left:8px;vertical-align:middle}
+.lvl-badge.stale{border-color:var(--coral);color:var(--coral)}
 .type-tag.tag-btn{cursor:pointer;font:inherit;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.14em}
 .type-tag.tag-btn:hover{background:#fff9f5}
 .type-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:34px 0 14px}
@@ -228,6 +234,7 @@ h1,h2,h3{font-family:'Playfair Display',Georgia,serif;letter-spacing:-.04em}
 .side-preview{width:100%;max-height:150px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#eeeae3;margin-top:8px}
 .chapter-row{display:grid;grid-template-columns:220px 1fr auto;gap:10px;align-items:start;border:1px solid var(--line);border-radius:9px;padding:10px;background:var(--white);margin-bottom:8px}
 .check-list{display:flex;flex-direction:column;gap:6px}.check-item{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--white);cursor:pointer}.check-item input{margin-top:3px;transform:scale(1.2)}.check-item strong{font-size:12px}.check-item small{color:var(--muted)}.wiz-steps{display:flex;gap:8px;margin:0 0 18px}.wiz-step{flex:1;text-align:center;font-size:11px;font-weight:700;color:var(--muted);border-bottom:3px solid var(--line);padding-bottom:8px}.wiz-step.on{color:var(--ink);border-color:var(--coral)}.wiz-step.done{color:var(--green);border-color:var(--green)}
+.talk-wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:14px}.talk-prog{display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:4px}.talk-dot{width:10px;height:10px;border-radius:50%;background:var(--line)}.talk-dot.on{background:var(--coral)}.talk-dot.done{background:var(--green)}.talk-msg{background:var(--white);border:1px solid var(--line);border-radius:14px 14px 14px 4px;padding:14px 16px;font-size:14px;line-height:1.6;max-width:92%}.talk-msg p{margin:0 0 8px}.talk-msg p:last-child{margin:0}.talk-user{align-self:flex-end;background:#eef4ea;border:1px solid #d5e2cf;border-radius:14px 14px 4px 14px;padding:10px 14px;font-size:13px;max-width:92%}.talk-input{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:14px 16px}.talk-input input[type=text]{width:100%;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:15px}.talk-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.talk-arch-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}@media(max-width:640px){.talk-arch-grid{grid-template-columns:1fr}}.talk-arch{border:2px solid var(--line);border-radius:12px;padding:14px;background:var(--white);cursor:pointer;text-align:left}.talk-arch.on{border-color:var(--coral);background:#fff9f5}.talk-arch .t-ico{font-size:26px}.talk-arch strong{display:block;font-size:14px;margin:6px 0 2px}.talk-arch small{color:var(--muted);font-size:12px}.talk-nav{display:flex;justify-content:space-between;gap:10px;margin-top:6px}.talk-note{font-size:12px;color:var(--muted)}
 .chapter-row input,.chapter-row textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:8px;font-size:12px;font-family:inherit;box-sizing:border-box}
 .chapter-row textarea{min-height:64px;resize:vertical}
 .row-del{background:transparent;border:0;color:var(--coral);font-size:15px;cursor:pointer;padding:6px}
@@ -394,6 +401,7 @@ function render() {
   if (state.view === 'comparison-studio') return renderComparisonStudio();
   if (state.view === 'card-studio') return renderCardStudio();
   if (state.view === 'materia-wizard') return renderMateriaWizard();
+  if (state.view === 'talk') return renderTalk();
   if (state.view === 'subject-viewer') return renderSubjectViewer();
   if (state.view === 'comparison-viewer') return renderComparisonViewer();
 }
@@ -431,9 +439,12 @@ function homeMaterieCreate() {
       modelli.forEach(function (mod) {
         var sid = mod.id || (mod.materiaId + ':' + mod.chiave + ':v' + mod.versione);
         html += '<div style="display:flex;gap:6px"><button class="btn small" style="flex:1" data-new-model="' + esc(sid) + '">+ ' + esc(mod.nome || mod.chiave) + '</button>' +
-          '<button class="btn small ghost" data-edit-model="' + esc(sid) + '" title="Modifica sezioni e prompt del modello">✎</button></div>';
+          '<button class="btn small ghost" data-edit-model="' + esc(sid) + '" title="Modifica sezioni e prompt del modello">✎</button>' +
+          '<button class="btn small ghost" data-del-model="' + esc(sid) + '" data-del-model-nome="' + esc(mod.nome || mod.chiave) + '" title="Elimina il modello (solo se senza schede)">🗑</button></div>';
       });
     }
+    html += '<div style="display:flex;gap:6px;margin-top:4px"><button class="btn small ghost" style="flex:1" data-new-model-talk="' + esc(m.id) + '">＋ Modello guidato</button>' +
+      '<button class="btn small ghost" data-del-materia="' + esc(m.id) + '" data-del-materia-nome="' + esc(m.nome || m.id) + '" title="Elimina la materia (solo se senza modelli)">🗑</button></div>';
     html += '</div></div>';
   });
   html += '</div></div>';
@@ -516,11 +527,8 @@ function homeSectionBody() {
   return html;
 }
 function renderHome() {
-  var html = topbar('',
-    '<button class="btn primary small" data-nav="new">+ Nuova opera</button>' +
-    '<button class="btn small" data-nav="new-subject">+ Nuovo soggetto</button>' +
-    '<button class="btn small" data-nav="new-comparison">+ Nuovo confronto</button>' +
-    '<button class="btn small" data-nav="new-card">+ Nuova scheda</button>' +
+  var   html = topbar('',
+    '<button class="btn primary small" data-nav="new-card">+ Nuova scheda</button>' +
     '<button class="btn small" data-nav="new-materia">+ Nuova materia</button>');
   html += '<h1 class="page-title">Crea le schede didattiche</h1>';
   html += '<p class="lead">Scegli la materia e il modello: l’editor segue lo schema, l’AI genera le sezioni, tu rivedi e approvi. Restano i tre tipi storici dell’arte (dipinto, soggetto, confronto).</p>';
@@ -2134,7 +2142,7 @@ function bindGlobal() {
       else if (dest === 'new-subject') { subjectStudio = new SubjectStudioView(); state.pipeline = null; state.view = 'subject-studio'; render(); }
       else if (dest === 'new-comparison') { comparisonStudio = new ComparisonStudioView(); state.pipeline = null; state.view = 'comparison-studio'; render(); }
       else if (dest === 'new-card') { cardStudio = new CardStudioView(); state.view = 'card-studio'; render(); refreshCardMaterie(); }
-      else if (dest === 'new-materia') { materiaWizard = new MateriaWizardView(); state.view = 'materia-wizard'; render(); }
+      else if (dest === 'new-materia') { talkStart('materia'); return; }
       return;
     }
     var open = e.target.closest('[data-open]');
@@ -2159,8 +2167,14 @@ function bindGlobal() {
     if (ocg) { e.preventDefault(); openCardStudio(ocg.getAttribute('data-open-card')); return; }
     var nm = e.target.closest('[data-new-model]');
     if (nm) { e.preventDefault(); newCardStudio(nm.getAttribute('data-new-model')); return; }
+    var rmo = e.target.closest('[data-del-model]');
+    if (rmo) { e.preventDefault(); removeModel(rmo.getAttribute('data-del-model'), rmo.getAttribute('data-del-model-nome')); return; }
+    var rma = e.target.closest('[data-del-materia]');
+    if (rma) { e.preventDefault(); removeMateria(rma.getAttribute('data-del-materia'), rma.getAttribute('data-del-materia-nome')); return; }
     var em = e.target.closest('[data-edit-model]');
     if (em) { e.preventDefault(); editModelWizard(em.getAttribute('data-edit-model')); return; }
+    var nmt = e.target.closest('[data-new-model-talk]');
+    if (nmt) { e.preventDefault(); talkStart('modello', nmt.getAttribute('data-new-model-talk')); return; }
     var dcg = e.target.closest('[data-del-card]');
     if (dcg) { e.preventDefault(); removeCard(dcg.getAttribute('data-del-card')); return; }
     var pipe = e.target.closest('[data-pipe]');
@@ -2185,6 +2199,9 @@ function CardStudioView() {
   this.materie = [];
   this.modelli = [];
   this.genBusy = {};
+  this.verbosita = 'standard';
+  this.istruzione = 'secondaria';
+  this.timbri = {}; // chiave -> {verbosita, istruzione} dell'ultima generate
 }
 var cardStudio = null;
 
@@ -2205,6 +2222,12 @@ function cardApplyFull(s, full) {
   s.modelloId = full.modello.id;
   s.materiaId = full.modello.materiaId;
   s.attive = Array.isArray(full.sezioniAttive) ? full.sezioniAttive.slice() : null;
+  s.verbosita = full.verbosita || 'standard';
+  s.istruzione = full.istruzione || 'secondaria';
+  s.timbri = {};
+  (full.sezioni || []).forEach(function (sez) {
+    if (sez.verbosita || sez.istruzione) s.timbri[sez.chiave] = { verbosita: sez.verbosita || '', istruzione: sez.istruzione || '' };
+  });
   s.checked = null; // solo creazione: chiavi spuntate nel Passo 1
   s.corpi = {};
   (full.modello.schema.sections || []).forEach(function (def) { s.corpi[def.key] = cardEmptyBody(def.type); });
@@ -2216,16 +2239,26 @@ function cardActiveDefs(s) {
   if (!s.attive) return defs;
   return defs.filter(function (d) { return s.attive.indexOf(d.key) >= 0; });
 }
+function secStale(s, key) {
+  var t = s.timbri && s.timbri[key];
+  if (!t || (!t.verbosita && !t.istruzione)) return false; // manuale: vale sempre
+  return t.verbosita !== s.verbosita || t.istruzione !== s.istruzione;
+}
+function lvlBadge(s, key) {
+  var t = s.timbri && s.timbri[key];
+  if (!t || (!t.verbosita && !t.istruzione)) return '<span class="lvl-badge">✏️ manuale</span>';
+  if (secStale(s, key)) return '<span class="lvl-badge stale">🔄 da rigenerare · ' + esc(t.verbosita + '/' + t.istruzione) + '</span>';
+  return '<span class="lvl-badge">AI · ' + esc(t.verbosita + '/' + t.istruzione) + '</span>';
+}
 function refreshCardMaterie() {
   var s = cardStudio;
   if (!s) return;
   api('/api/materie').then(function (r) {
     s.materie = r.materie || [];
-    if (!s.materiaId && s.materie.length) s.materiaId = s.materie[0].id;
-    if (s.materiaId) return api('/api/models?subject=' + encodeURIComponent(s.materiaId) + '&standard=1').then(function (m) {
-      s.modelli = m.models || [];
-      render();
-    });
+    // Nessuna preselezione: l'utente sceglie la materia (niente default arte).
+    s.materiaId = '';
+    s.modelloId = '';
+    s.modelli = [];
     render();
   }).catch(function (e) { toast(e.message); });
 }
@@ -2269,6 +2302,20 @@ function removeCard(id) {
   if (!confirm('Eliminare questa scheda e i suoi contenuti dal database?')) return;
   api('/api/cards/' + encodeURIComponent(id), { method: 'DELETE' }).then(function () {
     toast('Scheda eliminata', true);
+    refreshList();
+  }).catch(function (e) { toast(e.message); });
+}
+function removeModel(id, nome) {
+  if (!confirm('Eliminare il modello “' + (nome || id) + '” e le sue sezioni? Le schede già create restano intatte.')) return;
+  del('/api/models/' + encodeURIComponent(id)).then(function () {
+    toast('Modello eliminato', true);
+    refreshList();
+  }).catch(function (e) { toast(e.message); });
+}
+function removeMateria(id, nome) {
+  if (!confirm('Eliminare la materia “' + (nome || id) + '”? Solo possibile se non ha più modelli.')) return;
+  del('/api/materie/' + encodeURIComponent(id)).then(function () {
+    toast('Materia eliminata', true);
     refreshList();
   }).catch(function (e) { toast(e.message); });
 }
@@ -2334,12 +2381,24 @@ function renderCardStudio() {
   html += '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">Passo 1 · Modello</span></div>' +
     '<div class="meta-grid">' +
     '<div class="field"><label>Materia</label><select id="csMateria"' + (isNew ? '' : ' disabled') + '>' +
+    (isNew ? '<option value="">— Scegli la materia —</option>' : '') +
     s.materie.map(function (m) { return '<option value="' + esc(m.id) + '"' + (m.id === s.materiaId ? ' selected' : '') + '>' + esc(m.nome) + '</option>'; }).join('') +
     '</select></div>' +
-    '<div class="field"><label>Modello di scheda</label><select id="csModello"' + (isNew ? '' : ' disabled') + '>' +
+    '<div class="field"><label>Modello di scheda</label><select id="csModello"' + (isNew ? '' : ' disabled') + (isNew && !s.modelli.length ? ' disabled' : '') + '>' +
+    (isNew && !s.modelloId ? '<option value="">— Prima scegli la materia —</option>' : '') +
     s.modelli.map(function (m) { var sid = m.id || (m.materiaId + ':' + m.chiave + ':v' + m.versione); return '<option value="' + esc(sid) + '"' + (sid === s.modelloId ? ' selected' : '') + '>' + esc(m.nome || m.chiave) + '</option>'; }).join('') +
     '</select></div>' +
     '<div class="field"><label>Titolo della scheda</label><input id="csTitolo" value="' + esc(s.titolo) + '" placeholder="es. Kant e il criticismo" /></div>' +
+    '</div>' +
+    '<div class="meta-grid">' +
+    '<div class="field"><label>Verbosità della generazione</label><div class="seg" id="csVerb">' +
+    [['essenziale', 'Essenziale'], ['standard', 'Standard'], ['approfondita', 'Approfondita']].map(function (o) {
+      return '<button type="button" data-lv="' + o[0] + '"' + (o[0] === s.verbosita ? ' class="on"' : '') + '>' + o[1] + '</button>';
+    }).join('') + '</div><p class="step-note">Quantità di testo e voci generate.</p></div>' +
+    '<div class="field"><label>Livello di istruzione</label><div class="seg" id="csIstr">' +
+    [['primaria', 'Primaria'], ['secondaria', 'Secondaria'], ['universita', 'Università']].map(function (o) {
+      return '<button type="button" data-lv="' + o[0] + '"' + (o[0] === s.istruzione ? ' class="on"' : '') + '>' + o[1] + '</button>';
+    }).join('') + '</div><p class="step-note">Lessico e profondità dei testi generati.</p></div>' +
     '</div>' +
     '<div id="csSections">' + csSectionPicker(s) + '</div>' +
     (isNew ? '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" id="csCreate">Crea scheda</button></div>' : '') +
@@ -2347,7 +2406,7 @@ function renderCardStudio() {
   if (!isNew && s.modello) {
     cardActiveDefs(s).forEach(function (def) {
       html += '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">' + esc(def.title) +
-        (def.required ? ' · obbligatoria' : '') + ' · ' + esc(def.type) + '</span>' +
+        (def.required ? ' · obbligatoria' : '') + ' · ' + esc(def.type) + '<span id="cs-badge-' + esc(def.key) + '">' + lvlBadge(s, def.key) + '</span></span>' +
         '<span style="display:flex;gap:8px">' +
         (def.type !== 'image' ? '<button class="btn small" data-cs-gen="' + esc(def.key) + '">✨ Genera</button>' : '') +
         '<button class="btn small primary" data-cs-save="' + esc(def.key) + '">💾 Salva sezione</button></span></div>' +
@@ -2463,6 +2522,7 @@ function bindCardStudio(s) {
   if (mat) mat.onchange = function () {
     s.materiaId = mat.value; s.modelloId = ''; s.modelli = [];
     if (!s.id) {
+      if (!s.materiaId) { s.checked = null; render(); return; }
       api('/api/models?subject=' + encodeURIComponent(s.materiaId) + '&standard=1').then(function (m) {
         s.modelli = m.models || [];
         if (s.modelli.length) s.modelloId = s.modelli[0].id || (s.modelli[0].materiaId + ':' + s.modelli[0].chiave + ':v' + s.modelli[0].versione);
@@ -2478,6 +2538,12 @@ function bindCardStudio(s) {
     var wrap = document.getElementById('csSections');
     if (wrap) { wrap.innerHTML = csSectionPicker(s); bindCardStudio(s); }
   };
+  appEl.querySelectorAll('#csVerb button').forEach(function (b) {
+    b.onclick = function () { setCardLivello(s, 'verbosita', b.getAttribute('data-lv')); };
+  });
+  appEl.querySelectorAll('#csIstr button').forEach(function (b) {
+    b.onclick = function () { setCardLivello(s, 'istruzione', b.getAttribute('data-lv')); };
+  });
   var tit = document.getElementById('csTitolo');
   if (tit) {
     var titTimer = null;
@@ -2492,7 +2558,7 @@ function bindCardStudio(s) {
   var create = document.getElementById('csCreate');
   if (create) create.onclick = function () {
     if (!s.modelloId) { toast('Scegli un modello di scheda'); return; }
-    var body = { modelloId: s.modelloId, titolo: s.titolo };
+    var body = { modelloId: s.modelloId, titolo: s.titolo, verbosita: s.verbosita, istruzione: s.istruzione };
     var all = csModelKeys(s);
     var checked = csChecked(s);
     if (checked.length < all.length) body.sezioniAttive = checked;
@@ -2634,11 +2700,30 @@ function cardSaveSection(s, key, btn) {
     if (btn) { btn.disabled = false; btn.innerHTML = old; }
   }).catch(function (e) { toast(e.message); if (btn) { btn.disabled = false; btn.innerHTML = old; } });
 }
+function setCardLivello(s, field, value) {
+  if (s[field] === value) return;
+  if (!s.id) { s[field] = value; render(); return; }
+  var hasGen = Object.keys(s.timbri || {}).some(function (k) { return s.timbri[k] && (s.timbri[k].verbosita || s.timbri[k].istruzione); });
+  if (hasGen && !confirm('Cambiando livello le sezioni già generate andranno rigenerate prima di approvare. Continuare?')) { render(); return; }
+  var p = {};
+  p[field] = value;
+  patch('/api/cards/' + encodeURIComponent(s.id), p).then(function (r) {
+    s[field] = r.card[field];
+    toast('Livello aggiornato', true);
+    render();
+  }).catch(function (e) { toast(e.message); });
+}
+function refreshSecBadge(s, key) {
+  var el = document.getElementById('cs-badge-' + key);
+  if (el) el.innerHTML = lvlBadge(s, key);
+}
 function cardGenSection(s, key, btn) {
   var old = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
   post('/api/cards/' + encodeURIComponent(s.id) + '/generate/' + encodeURIComponent(key), {}).then(function (r) {
     if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
+    if (r.section) s.timbri[key] = { verbosita: r.section.verbosita || s.verbosita, istruzione: r.section.istruzione || s.istruzione };
+    refreshSecBadge(s, key);
     if (r.warnings && r.warnings.length) toast('Generata con avvisi: ' + r.warnings.join('; '));
     else toast('Sezione generata', true);
     refreshCardSection(s, key);
@@ -2680,7 +2765,7 @@ function cardSaveAll(s, btn) {
 }
 function cardGenAll(s, btn, onlyMissing) {
   var defs = cardActiveDefs(s).filter(function (d) { return d.type !== 'image'; });
-  if (onlyMissing) defs = defs.filter(function (d) { return cardIsEmpty(d.type, s.corpi[d.key]); });
+  if (onlyMissing) defs = defs.filter(function (d) { return cardIsEmpty(d.type, s.corpi[d.key]) || secStale(s, d.key); });
   if (onlyMissing && !defs.length) { toast('Niente da generare: tutte le sezioni hanno già contenuti', true); return; }
   var i = 0;
   var label = onlyMissing ? '✨ Genera mancanti' : '⚡ Genera tutte le sezioni';
@@ -2691,6 +2776,7 @@ function cardGenAll(s, btn, onlyMissing) {
     var key = defs[i].key;
     post('/api/cards/' + encodeURIComponent(s.id) + '/generate/' + encodeURIComponent(key), {}).then(function (r) {
       if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
+      if (r.section) s.timbri[key] = { verbosita: r.section.verbosita || s.verbosita, istruzione: r.section.istruzione || s.istruzione };
       i += 1;
       step();
     }).catch(function (e) { toast('Sezione ' + key + ': ' + e.message); i += 1; step(); });
@@ -3088,6 +3174,508 @@ function stripSec(d) {
   return { key: d.key, title: d.title, type: d.type, required: !!d.required, prompt: d.prompt || '', system: d.system || '', maxWords: (d.maxWords === undefined || d.maxWords === null || d.maxWords === '') ? undefined : Number(d.maxWords) };
 }
 
+/* ---------- wizard dialogico guidato (creazione materie/modelli) ---------- */
+var TALK_ARCH = [
+  { key: 'autore', icon: '📖', title: 'Persone', desc: 'la vita e le opere di una persona', ex: 'Mozart', nomeSug: 'L\u2019autore', match: ['autore', 'autore-pensiero', 'compositore', 'filosofo', 'scrittore'], fallback: 'filosofia:autore:v1' },
+  { key: 'opera', icon: '🎼', title: 'Opere', desc: 'il contenuto e la struttura di un\u2019opera', ex: 'il Flauto magico', nomeSug: 'L\u2019opera', match: ['opera-filosofica', 'opera-letteraria', 'opera', 'composizione'], fallback: 'filosofia:opera-filosofica:v2' },
+  { key: 'confronto', icon: '⚖️', title: 'Confronti', desc: 'due autori o due opere fianco a fianco', ex: 'Mozart e Salieri', nomeSug: 'Il confronto', match: ['confronto-filosofico', 'confronto-letterario', 'confronto'], fallback: 'filosofia:confronto-filosofico:v1' },
+  { key: 'tema', icon: '💡', title: 'Temi', desc: 'un tema che attraversa il tempo', ex: 'il Romanticismo', nomeSug: 'Il tema', match: ['tematica', 'tematica-letteraria', 'tema'], fallback: 'filosofia:tematica:v1' }
+];
+function TalkingWizard() {
+  this.entry = 'materia'; // 'materia' | 'modello'
+  this.step = 1;
+  this.materia = { nome: '', descrizione: '', systemPrompt: '', toneDraft: '', toneFromLLM: false };
+  this.fixedMateria = null; // {id, nome} per entry 'modello'
+  this.picked = []; // arch keys scelte al passo 2
+  this.scelte = []; // [{arch, nome, tplMain, tplAltri, mode, tplId, sections, drop[]}]
+  this.loading = false;
+  this.busy = false;
+  this.done = null; // {materiaNome, models:[{id,nome,nSec}]}
+}
+var talk = null;
+function talkStart(entry, materiaId) {
+  talk = new TalkingWizard();
+  talk.entry = entry === 'modello' ? 'modello' : 'materia';
+  if (talk.entry === 'modello') {
+    var m = (state.materie || []).find(function (x) { return x.id === materiaId; }) || { id: materiaId, nome: materiaId };
+    talk.fixedMateria = { id: m.id, nome: m.nome || m.id };
+    talk.step = 2;
+  }
+  state.view = 'talk';
+  render();
+}
+function talkArch(k) {
+  return TALK_ARCH.find(function (a) { return a.key === k; }) || null;
+}
+function talkMateriaNome(t) {
+  return t.entry === 'modello' ? t.fixedMateria.nome : (t.materia.nome || 'questa materia');
+}
+function talkEnsureCache(cb) {
+  var has = Object.keys(state.modelliPerMateria || {}).some(function (k) { return (state.modelliPerMateria[k] || []).length; });
+  if (has) return cb();
+  api('/api/materie').then(function (r) {
+    state.materie = r.materie || [];
+    var ids = state.materie.map(function (m) { return m.id; });
+    var chain = Promise.resolve();
+    state.modelliPerMateria = {};
+    ids.forEach(function (id) {
+      chain = chain.then(function () {
+        return api('/api/models?subject=' + encodeURIComponent(id)).then(function (m) {
+          state.modelliPerMateria[id] = m.models || [];
+        }).catch(function () { state.modelliPerMateria[id] = []; });
+      });
+    });
+    return chain;
+  }).then(cb).catch(function (e) { toast(e.message); });
+}
+function talkCandidates(arch) {
+  var out = [];
+  Object.keys(state.modelliPerMateria || {}).forEach(function (mid) {
+    (state.modelliPerMateria[mid] || []).forEach(function (m) {
+      var sid = m.id || (m.materiaId + ':' + m.chiave + ':v' + m.versione);
+      var mat = (state.materie || []).find(function (x) { return x.id === (m.materiaId || mid); });
+      out.push({ id: sid, chiave: m.chiave, nome: m.nome || m.chiave, versione: m.versione || 0, materiaId: m.materiaId || mid, materiaNome: (mat && mat.nome) || (m.materiaId || mid) });
+    });
+  });
+  var same = out.filter(function (c) { return arch.match.indexOf(c.chiave) >= 0; });
+  return { same: same, all: out };
+}
+function talkSuggest(arch) {
+  var c = talkCandidates(arch);
+  c.same.sort(function (a, b) { return (b.versione || 0) - (a.versione || 0); });
+  var main = c.same[0] || c.all.find(function (x) { return x.id === arch.fallback; }) || c.all[0] || null;
+  var altri = c.same.filter(function (x) { return !main || x.id !== main.id; }).slice(0, 12);
+  return { main: main, altri: altri };
+}
+function talkLoadSections(tplId) {
+  var matId = String(tplId).split(':')[0];
+  return api('/api/models?subject=' + encodeURIComponent(matId)).then(function (r) {
+    var f = (r.models || []).find(function (m) { return m.id === tplId; });
+    var secs = (f && f.schema && f.schema.sections) || [];
+    return JSON.parse(JSON.stringify(secs));
+  });
+}
+function talkSteps(t) {
+  return t.entry === 'modello' ? [2, 3, 4, 5] : [1, 2, 3, 4, 5];
+}
+function talkDots(t) {
+  return '<div class="talk-prog">' + talkSteps(t).map(function (n) {
+    return '<span class="talk-dot' + (n === t.step ? ' on' : (n < t.step ? ' done' : '')) + '" title="Passo ' + n + '"></span>';
+  }).join('') + '</div>';
+}
+function talkBot(html) { return '<div class="talk-msg">' + html + '</div>'; }
+function talkUserBubble(text) { return '<div class="talk-user">' + esc(text) + '</div>'; }
+function talkNav(t, opts) {
+  opts = opts || {};
+  var backLabel = t.step === (t.entry === 'modello' ? 2 : 1) ? '← Elenco' : '← Torna indietro';
+  var html = '<div class="talk-nav"><div><button class="btn" id="talkBack">' + backLabel + '</button></div><div>';
+  if (t.step < 5) html += '<button class="btn primary" id="talkNext">' + esc(opts.nextLabel || 'Avanti →') + '</button>';
+  else html += '<button class="btn green" id="talkSave" style="padding:14px 22px"' + (t.busy ? ' disabled' : '') + '>' + (t.busy ? 'Creazione…' : '🎉 Sì, crea tutto') + '</button>';
+  return html + '</div></div>';
+}
+function talkStep1(t) {
+  var html = talkBot('<p>Ciao! Creiamo una materia insieme. È facile: ti faccio qualche domanda e penso io a tutto il resto.</p><p><strong>Come si chiama la materia?</strong></p>');
+  html += '<div class="talk-input"><input type="text" id="talkNome" value="' + esc(t.materia.nome) + '" placeholder="es. Storia della musica" maxlength="80" />';
+  html += '<div class="talk-chips"><span class="talk-note">Penserò io all\u2019indirizzo tecnico.</span></div></div>';
+  if (t.materia.nome.trim()) html += talkUserBubble(t.materia.nome.trim());
+  html += '<div class="talk-input"><input type="text" id="talkDesc" value="' + esc(t.materia.descrizione) + '" placeholder="Una riga di descrizione (opzionale)" maxlength="200" /></div>';
+  html += talkNav(t);
+  html += '<p class="talk-note" style="text-align:center">oppure <a href="#" id="talkTech">usa l\u2019editor tecnico</a></p>';
+  return html;
+}
+function talkStep2(t) {
+  var html = '';
+  if (t.entry === 'materia') html += talkUserBubble(t.materia.nome.trim());
+  html += talkBot('<p><strong>Cosa vuoi schedare in ' + esc(talkMateriaNome(t)) + '?</strong></p><p>Ti preparo questi 4 modelli standard — <strong>togli pure quelli che non ti servono</strong> 👇</p>');
+  html += '<div class="talk-arch-grid">';
+  TALK_ARCH.forEach(function (a) {
+    var on = t.picked.indexOf(a.key) >= 0;
+    html += '<button class="talk-arch' + (on ? ' on' : '') + '" data-talk-arch="' + a.key + '"><span class="t-ico">' + a.icon + '</span><strong>' + (on ? '✓ ' : '') + esc(a.title) + '</strong><small>' + esc(a.desc) + ' (es. ' + esc(a.ex) + ')</small></button>';
+  });
+  html += '</div>' + talkNav(t);
+  return html;
+}
+function talkStep3(t) {
+  if (t.loading) return talkBot('<p>🔍 Sto preparando e adattando i testi alla tua materia…</p><p class="talk-note">Se l\u2019adattamento non riesce, tengo i testi originali: non perdi niente.</p>');
+  var html = '';
+  t.picked.forEach(function (k) { var a = talkArch(k); if (a) html += talkUserBubble(a.title); });
+  html += talkBot('<p>Per ognuno dimmi <strong>come lo chiamiamo</strong> e <strong>da dove copio la struttura</strong> (copio un modello che funziona già, tu non dovrai scrivere niente).</p>');
+  t.scelte.forEach(function (sc, i) {
+    var a = talkArch(sc.arch);
+    html += '<div class="talk-input" style="margin-top:10px"><p style="margin:0 0 8px"><strong>' + a.icon + ' ' + esc(a.title) + '</strong></p>';
+    html += '<input type="text" data-talk-nome="' + i + '" value="' + esc(sc.nome) + '" maxlength="80" />';
+    if (sc.mode === 'scratch') {
+      html += '<div class="talk-chips"><span class="talk-note">Partirai da zero: dopo la creazione aggiungi le parti dal ✎ del modello.</span> <button class="btn small" data-talk-tplmode="' + i + ':main">Usa un modello esistente</button></div>';
+    } else {
+      var cur = sc.mode === 'altro' ? sc.tplAltro : sc.tplMain;
+      html += '<div class="talk-chips">';
+      html += '<button class="btn small' + (sc.mode === 'main' ? ' primary' : '') + '" data-talk-tplmode="' + i + ':main">✅ ' + esc(sc.tplMain ? ('“' + sc.tplMain.nome + '”') : 'consigliato') + '</button>';
+      if (sc.tplAltri.length) html += '<button class="btn small' + (sc.mode === 'altro' ? ' primary' : '') + '" data-talk-tplmode="' + i + ':altro">Scegli un altro…</button>';
+      html += '<button class="btn small ghost" data-talk-tplmode="' + i + ':scratch">Parti da zero</button></div>';
+      if (sc.mode === 'altro') {
+        html += '<div class="field" style="margin-top:8px"><select data-talk-altro="' + i + '">' +
+          sc.tplAltri.map(function (c) { return '<option value="' + esc(c.id) + '"' + (sc.tplId === c.id ? ' selected' : '') + '>' + esc(c.nome + ' (' + c.materiaNome + ')') + '</option>'; }).join('') +
+          '</select></div>';
+      } else if (cur) {
+        html += '<p class="talk-note">Copio la struttura di “' + esc(cur.nome) + '”' + (cur.materiaNome ? ' (' + esc(cur.materiaNome) + ')' : '') + '.</p>';
+      }
+    }
+    html += '</div>';
+  });
+  html += talkNav(t);
+  return html;
+}
+function talkStep4(t) {
+  var html = talkBot('<p>Ecco le <strong>parti</strong> che ho preparato. Quelle con ★ servono per approvare la scheda, le altre puoi toglierle se vuoi.</p>');
+  if (t.entry === 'materia' && t.materia.toneFromLLM) {
+    html += talkBot('<p>🎨 Per questa materia userò questo tono:</p>');
+    html += '<div class="talk-input"><input type="text" id="talkTone" value="' + esc(t.materia.systemPrompt) + '" maxlength="300" /><p class="talk-note">Puoi cambiarlo, oppure svuotarlo per usare il tono standard.</p></div>';
+  }
+  t.scelte.forEach(function (sc, i) {
+    var a = talkArch(sc.arch);
+    var req = (sc.sections || []).filter(function (d) { return d.required; }).length;
+    html += '<div class="talk-input" style="margin-top:10px"><p style="margin:0 0 8px"><strong>' + a.icon + ' ' + esc(sc.nome || a.title) + '</strong> <span class="talk-note">' + sc.sections.length + ' parti' + (req ? ', ' + req + ' obbligatorie' : '') + '</span></p>';
+    if (sc.adapted && sc.adapted.ok && sc.mode !== 'scratch') {
+      html += '<div class="talk-chips"><button class="btn small' + (sc.useAdapted ? ' primary' : '') + '" data-talk-use="' + i + ':adattati">✅ Testi adattati</button>' +
+        '<button class="btn small' + (!sc.useAdapted ? ' primary' : '') + '" data-talk-use="' + i + ':originali">Vedi gli originali</button></div>';
+    } else if (sc.mode !== 'scratch') {
+      html += '<p class="talk-note">Adattamento non riuscito: uso i testi originali del modello.</p>';
+    }
+    (sc.sections || []).forEach(function (d) {
+      var snippet = talkEffPrompt(sc, d);
+      if (snippet.length > 140) snippet = snippet.slice(0, 140) + '…';
+      var row = '<div><strong>' + esc(d.title) + '</strong>' + (snippet ? '<br /><span class="talk-note">“' + esc(snippet) + '”</span>' : '') + '</div>';
+      if (d.required) html += '<p class="talk-note" style="margin:4px 0">★ ' + row + ' <span class="talk-note">— sempre presente</span></p>';
+      else {
+        var off = sc.drop.indexOf(d.key) >= 0;
+        html += '<label class="check-item" style="margin:4px 0"><input type="checkbox" data-talk-drop="' + i + ':' + esc(d.key) + '"' + (off ? '' : ' checked') + ' /> <span>' + row + '</span></label>';
+      }
+    });
+    if (sc.voiceFromLLM) {
+      html += '<div class="field" style="margin-top:8px"><label>Voce di questo modello</label><input type="text" data-talk-voice="' + i + '" value="' + esc(sc.voice) + '" maxlength="300" /></div>';
+    }
+    html += '</div>';
+  });
+  html += talkNav(t);
+  html += '<p class="talk-note" style="text-align:center">Vuoi cambiare i testi delle istruzioni? Potrai farlo dopo, dal ✎ del modello.</p>';
+  return html;
+}
+function talkStep5(t) {
+  var matNome = t.entry === 'modello' ? t.fixedMateria.nome : t.materia.nome.trim();
+  var html = talkBot('<p><strong>Ricapitolando:</strong></p><p>📚 ' + esc(matNome) + '</p><p>' +
+    t.scelte.map(function (sc) {
+      var a = talkArch(sc.arch);
+      var n = sc.mode === 'scratch' ? 1 : (sc.sections.length - sc.drop.length);
+      var how = sc.mode === 'scratch' ? '' : (sc.useAdapted && sc.adapted && sc.adapted.ok ? ', testi adattati' : ', testi originali');
+      return a.icon + ' ' + esc(sc.nome || a.title) + ' (' + n + (n === 1 ? ' parte' : ' parti') + how + ')';
+    }).join('<br />') + '</p><p>Creo tutto?</p>');
+  html += talkNav(t, { nextLabel: '' });
+  return html;
+}
+function talkDoneHtml(t) {
+  var html = talkBot('<p>🎉 <strong>Fatto!</strong> ' + esc(t.done.materiaNome) + ' è pronta con ' +
+    t.done.models.map(function (m) { return '“' + m.nome + '”'; }).join(', ') + '.</p>');
+  html += '<div class="talk-nav"><div><button class="btn" data-nav="home">← Torna all\u2019elenco</button></div><div>' +
+    '<button class="btn primary" id="talkFirst">➕ Crea la prima scheda</button></div></div>';
+  return html;
+}
+function renderTalk() {
+  var t = talk;
+  if (!t) { talk = new TalkingWizard(); t = talk; }
+  var html = topbar('', '<button class="btn small" data-nav="home">← Elenco</button>');
+  html += '<h1 class="page-title">' + (t.entry === 'modello' ? 'Nuovo modello guidato' : 'Nuova materia guidata') + '</h1>';
+  html += '<div class="talk-wrap">' + talkDots(t);
+  if (t.done) html += talkDoneHtml(t);
+  else if (t.step === 1) html += talkStep1(t);
+  else if (t.step === 2) html += talkStep2(t);
+  else if (t.step === 3) html += talkStep3(t);
+  else if (t.step === 4) html += talkStep4(t);
+  else html += talkStep5(t);
+  html += '</div>';
+  appEl.innerHTML = html;
+  bindTalk(t);
+}
+function talkGotoStep3(t) {
+  t.scelte = t.picked.map(function (k) {
+    var a = talkArch(k);
+    var s = talkSuggest(a);
+    return { arch: k, nome: a.nomeSug, tplMain: s.main, tplAltri: s.altri, mode: s.main ? 'main' : 'scratch', tplId: s.main ? s.main.id : '', sections: [], drop: [], adapted: null, useAdapted: true, showOrig: false, voice: '', voiceFromLLM: false };
+  });
+  t.loading = true;
+  render();
+  var chain = Promise.resolve();
+  t.scelte.forEach(function (sc) {
+    if (sc.mode === 'scratch') { sc.sections = []; return; }
+    chain = chain.then(function () {
+      return talkLoadSections(sc.tplId).then(function (secs) { sc.sections = secs; }).catch(function () { sc.sections = []; sc.mode = 'scratch'; });
+    });
+  });
+  chain.then(function () { t.loading = false; t.step = 3; render(); talkAdaptAll(t); });
+}
+function talkApplyAdapt(t, sc, o, materiaTone) {
+  var byKey = {};
+  (o.sections || []).forEach(function (a) { if (a && a.key) byKey[a.key] = { prompt: a.prompt || '', system: a.system || '' }; });
+  sc.adapted = { ok: true, byKey: byKey };
+  sc.voice = o.modelVoice || '';
+  sc.voiceFromLLM = !!o.modelVoice;
+  if (t.entry === 'materia' && materiaTone && !t.materia.toneFromLLM) {
+    t.materia.systemPrompt = materiaTone;
+    t.materia.toneDraft = materiaTone;
+    t.materia.toneFromLLM = true;
+  }
+}
+function talkAdaptOne(t, sc) {
+  // Adatta i testi del template alla materia via LLM (mai bloccante: se fallisce, verbatim).
+  var matNome = t.entry === 'modello' ? t.fixedMateria.nome : t.materia.nome.trim();
+  var matDesc = t.entry === 'modello' ? '' : t.materia.descrizione;
+  var tpl = sc.mode === 'altro'
+    ? (sc.tplAltri.find(function (c) { return c.id === sc.tplId; }) || sc.tplMain)
+    : sc.tplMain;
+  return post('/api/models/adapt', {
+    materia: { nome: matNome, descrizione: matDesc },
+    modello: { nome: sc.nome.trim() || talkArch(sc.arch).nomeSug },
+    sourceMateriaNome: (tpl && tpl.materiaNome) || '',
+    sections: sc.sections.map(function (d) { return { key: d.key, title: d.title, type: d.type, prompt: d.prompt || '', system: d.system || '' }; })
+  }).then(function (r) {
+    talkApplyAdapt(t, sc, { sections: r.sections, modelVoice: r.modelVoice }, r.materiaTone);
+  }).catch(function () {
+    sc.adapted = { ok: false };
+  });
+}
+function talkAdaptAll(t) {
+  var need = t.scelte.filter(function (sc) { return sc.mode !== 'scratch' && sc.sections.length && !sc.adapted; });
+  if (!need.length) return;
+  t.loading = true;
+  render();
+  var matNome = t.entry === 'modello' ? t.fixedMateria.nome : t.materia.nome.trim();
+  var matDesc = t.entry === 'modello' ? '' : t.materia.descrizione;
+  var tplOf = function (sc) {
+    return sc.mode === 'altro'
+      ? (sc.tplAltri.find(function (c) { return c.id === sc.tplId; }) || sc.tplMain)
+      : sc.tplMain;
+  };
+  var settle = function () { t.loading = false; render(); };
+  post('/api/models/adapt', {
+    materia: { nome: matNome, descrizione: matDesc },
+    models: need.map(function (sc) {
+      var tpl = tplOf(sc);
+      return {
+        nome: sc.nome.trim() || talkArch(sc.arch).nomeSug,
+        sourceMateriaNome: (tpl && tpl.materiaNome) || '',
+        sections: sc.sections.map(function (d) { return { key: d.key, title: d.title, type: d.type, prompt: d.prompt || '', system: d.system || '' }; })
+      };
+    })
+  }).then(function (r) {
+    var arr = (r && r.models) || [];
+    var retries = [];
+    need.forEach(function (sc, i) {
+      var o = arr[i] || null;
+      if (o && o.ok) talkApplyAdapt(t, sc, o, r.materiaTone);
+      else retries.push(sc);
+    });
+    var chain = Promise.resolve();
+    retries.forEach(function (sc) { chain = chain.then(function () { return talkAdaptOne(t, sc); }); });
+    return chain;
+  }).catch(function () {
+    var chain = Promise.resolve();
+    need.forEach(function (sc) { chain = chain.then(function () { return talkAdaptOne(t, sc); }); });
+    return chain;
+  }).then(settle);
+}
+function talkEffPrompt(sc, d) {
+  if (sc.useAdapted && sc.adapted && sc.adapted.ok && sc.adapted.byKey[d.key]) {
+    var p = sc.adapted.byKey[d.key].prompt;
+    if (p) return p;
+  }
+  return d.prompt || '';
+}
+function talkUniqueChiave(base, taken) {
+  var c = base || 'modello', n = 0, out = c;
+  while (taken.indexOf(out) >= 0) { n += 1; out = c + '-' + n; }
+  taken.push(out);
+  return out;
+}
+function talkSave(t) {
+  if (t.entry === 'materia' && !t.materia.nome.trim()) { toast('Scrivi il nome della materia'); return; }
+  if (!t.scelte.length) { toast('Scegli almeno un tipo di scheda'); return; }
+  for (var i = 0; i < t.scelte.length; i++) {
+    if (!t.scelte[i].nome.trim()) { toast('Dai un nome a ogni modello'); t.step = 3; render(); return; }
+  }
+  t.busy = true;
+  render();
+  var matNome = t.entry === 'modello' ? t.fixedMateria.nome : t.materia.nome.trim();
+  var mid = t.entry === 'modello' ? t.fixedMateria.id : '';
+  var chain = Promise.resolve();
+  if (t.entry === 'materia') {
+    mid = mwSlug(t.materia.nome);
+    chain = post('/api/materie', { id: mid, nome: t.materia.nome.trim(), descrizione: t.materia.descrizione, systemPrompt: t.materia.systemPrompt }).then(function (r) {
+      mid = (r.materia && r.materia.id) || mid;
+    });
+  }
+  chain.then(function () { return api('/api/models?subject=' + encodeURIComponent(mid)); })
+    .then(function (r) {
+      var taken = (r.models || []).map(function (m) { return m.chiave; });
+      var seq = Promise.resolve();
+      var created = [];
+      t.scelte.forEach(function (sc) {
+        seq = seq.then(function () {
+          var chiave = talkUniqueChiave(mwSlug(sc.nome), taken);
+          var body = { materiaId: mid, chiave: chiave, nome: sc.nome.trim() };
+          if (sc.mode === 'scratch' || !sc.sections.length) {
+            body.sections = [{ key: 'introduzione', title: 'Introduzione', type: 'text', required: true }];
+          } else {
+            var kept = sc.sections.filter(function (d) { return sc.drop.indexOf(d.key) < 0; });
+            var usingAdapted = sc.useAdapted && sc.adapted && sc.adapted.ok;
+            var effKept = kept.map(function (d) {
+              var o = stripSec(d);
+              if (usingAdapted && sc.adapted.byKey[d.key]) {
+                if (sc.adapted.byKey[d.key].prompt) o.prompt = sc.adapted.byKey[d.key].prompt;
+                o.system = sc.adapted.byKey[d.key].system || '';
+                if (!o.prompt) delete o.prompt;
+                if (!o.system) delete o.system;
+              }
+              return o;
+            });
+            var pure = usingAdapted ? false : (kept.length === sc.sections.length);
+            if (pure && sc.tplId) body.fromTemplate = sc.tplId;
+            else body.sections = effKept;
+          }
+          return post('/api/models', body).then(function (r2) {
+            created.push({ id: r2.model.id, nome: sc.nome.trim(), nSec: (r2.model.schema.sections || []).length });
+            if (sc.useAdapted && (sc.voice || '').trim()) {
+              return patch('/api/models/' + encodeURIComponent(r2.model.id), { systemPrompt: sc.voice.trim() }).then(function () { return r2; });
+            }
+            return r2;
+          });
+        });
+      });
+      return seq.then(function () { return created; });
+    })
+    .then(function (created) {
+      t.busy = false;
+      t.done = { materiaNome: matNome, materiaId: mid, models: created };
+      state.view = 'talk';
+      refreshTalkCache(mid);
+      render();
+    })
+    .catch(function (e) { t.busy = false; render(); toast((e && e.message) || e); });
+}
+function refreshTalkCache(mid) {
+  api('/api/models?subject=' + encodeURIComponent(mid)).then(function (r) {
+    state.modelliPerMateria[mid] = r.models || [];
+  }).catch(function () {});
+  api('/api/materie').then(function (r) { state.materie = r.materie || []; }).catch(function () {});
+}
+function bindTalk(t) {
+  var back = document.getElementById('talkBack');
+  if (back) back.onclick = function () {
+    var first = t.entry === 'modello' ? 2 : 1;
+    if (t.step <= first) { state.view = 'home'; refreshList(); return; }
+    t.step -= 1;
+    render();
+  };
+  var next = document.getElementById('talkNext');
+  if (next) next.onclick = function () {
+    if (t.step === 1) {
+      if (!t.materia.nome.trim()) { toast('Scrivi il nome della materia'); return; }
+      if (!t.step2seen) { t.picked = TALK_ARCH.map(function (a) { return a.key; }); t.step2seen = true; }
+      t.step = 2;
+      render();
+    } else if (t.step === 2) {
+      if (!t.picked.length) { toast('Scegline almeno una 👆'); return; }
+      talkGotoStep3(t);
+    } else if (t.step === 3) {
+      var ok = true;
+      t.scelte.forEach(function (sc) { if (!sc.nome.trim()) ok = false; });
+      if (!ok) { toast('Dai un nome a ogni modello'); return; }
+      t.step = 4;
+      render();
+    } else if (t.step === 4) {
+      t.step = 5;
+      render();
+    }
+  };
+  var save = document.getElementById('talkSave');
+  if (save) save.onclick = function () { talkSave(t); };
+  var first = document.getElementById('talkFirst');
+  if (first) first.onclick = function () {
+    if (t.done && t.done.models.length) newCardStudio(t.done.models[0].id);
+  };
+  var nome = document.getElementById('talkNome');
+  if (nome) {
+    nome.oninput = function () { t.materia.nome = nome.value; };
+    var desc = document.getElementById('talkDesc');
+    if (desc) desc.oninput = function () { t.materia.descrizione = desc.value; };
+  }
+  var tech = document.getElementById('talkTech');
+  if (tech) tech.onclick = function (e) {
+    e.preventDefault();
+    talk = null;
+    materiaWizard = new MateriaWizardView();
+    state.view = 'materia-wizard';
+    render();
+  };
+  appEl.querySelectorAll('[data-talk-arch]').forEach(function (b) {
+    b.onclick = function () {
+      var k = b.getAttribute('data-talk-arch');
+      var i = t.picked.indexOf(k);
+      if (i >= 0) t.picked.splice(i, 1);
+      else t.picked.push(k);
+      b.classList.toggle('on', i < 0);
+      var st = b.querySelector('strong');
+      if (st) st.textContent = (i < 0 ? '✓ ' : '') + talkArch(k).title;
+    };
+  });
+  appEl.querySelectorAll('[data-talk-nome]').forEach(function (inp) {
+    inp.oninput = function () { t.scelte[Number(inp.getAttribute('data-talk-nome'))].nome = inp.value; };
+  });
+  appEl.querySelectorAll('[data-talk-tplmode]').forEach(function (b) {
+    b.onclick = function () {
+      var parts = b.getAttribute('data-talk-tplmode').split(':');
+      var sc = t.scelte[Number(parts[0])];
+      sc.mode = parts[1];
+      if (sc.mode === 'altro' && sc.tplAltri.length) sc.tplId = sc.tplAltri[0].id;
+      if (sc.mode === 'main' && sc.tplMain) sc.tplId = sc.tplMain.id;
+      if (sc.mode === 'scratch') { sc.sections = []; sc.drop = []; render(); return; }
+      t.loading = true;
+      render();
+      talkLoadSections(sc.tplId).then(function (secs) { sc.sections = secs; sc.drop = []; t.loading = false; render(); })
+        .catch(function () { sc.sections = []; sc.mode = 'scratch'; t.loading = false; render(); });
+    };
+  });
+  appEl.querySelectorAll('[data-talk-altro]').forEach(function (sel) {
+    sel.onchange = function () {
+      var sc = t.scelte[Number(sel.getAttribute('data-talk-altro'))];
+      sc.tplId = sel.value;
+      t.loading = true;
+      render();
+      talkLoadSections(sc.tplId).then(function (secs) { sc.sections = secs; sc.drop = []; t.loading = false; render(); })
+        .catch(function (e) { t.loading = false; render(); toast(e.message); });
+    };
+  });
+  appEl.querySelectorAll('[data-talk-use]').forEach(function (b) {
+    b.onclick = function () {
+      var parts = b.getAttribute('data-talk-use').split(':');
+      var sc = t.scelte[Number(parts[0])];
+      sc.useAdapted = parts[1] === 'adattati';
+      render();
+    };
+  });
+  var tone = document.getElementById('talkTone');
+  if (tone) tone.oninput = function () { t.materia.systemPrompt = tone.value; };
+  appEl.querySelectorAll('[data-talk-voice]').forEach(function (inp) {
+    inp.oninput = function () { t.scelte[Number(inp.getAttribute('data-talk-voice'))].voice = inp.value; };
+  });
+  appEl.querySelectorAll('[data-talk-drop]').forEach(function (box) {
+    box.onchange = function () {
+      var parts = box.getAttribute('data-talk-drop').split(':');
+      var sc = t.scelte[Number(parts[0])];
+      var i = sc.drop.indexOf(parts[1]);
+      if (box.checked && i >= 0) sc.drop.splice(i, 1);
+      if (!box.checked && i < 0) sc.drop.push(parts[1]);
+    };
+  });
+}
 /* ---------- home actions ---------- */
 function refreshList() {
   Promise.all([api('/api/artworks'), api('/api/subjects'), api('/api/comparisons'), api('/api/cards').catch(function () { return { cards: [] }; }), api('/api/materie').catch(function () { return { materie: [] }; })]).then(function (results) {

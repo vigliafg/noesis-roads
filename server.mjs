@@ -369,9 +369,9 @@ export async function callModel(model, content, apiKey, fetchImpl = globalThis.f
   const messages = opts.system
     ? [{ role: 'system', content: opts.system }, { role: 'user', content }]
     : [{ role: 'user', content }];
-  const body = { model, messages, temperature: 0.2, top_p: 0.7, max_tokens: 8000, stream: false };
+  const body = { model, messages, temperature: 0.2, top_p: 0.7, max_tokens: opts.maxTokens || 8000, stream: false };
   if (webSearchEnabled()) body.plugins = [{ id: 'web', max_results: 5 }];
-  const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json', 'HTTP-Referer': 'http://127.0.0.1:18000', 'X-Title': 'Leggi l Opera d Arte' };
+  const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json', 'HTTP-Referer': 'http://127.0.0.1:18000', 'X-Title': 'Noesis Roads Schede didattiche' };
   let response = null;
   let lastError = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -499,6 +499,9 @@ function dbComparisonPayload(id) {
 }
 function catalogScheda(s) {
   const schema = (s.modello && s.modello.schema) || {};
+  const imgs = Array.isArray(s.immagini) ? s.immagini : [];
+  const imgKeys = ((schema.sections || []).filter((d) => d.type === 'image')).map((d) => d.key);
+  const cover = imgs.find((m) => imgKeys.includes(m.ruolo)) || imgs[0] || null;
   return {
     cardType: 'scheda',
     id: s.id,
@@ -506,7 +509,7 @@ function catalogScheda(s) {
     materiaId: schema.subject || '',
     modelloKey: schema.key || '',
     subtitle: [schema.subject, schema.name].filter(Boolean).join(' · '),
-    image: null,
+    image: cover ? ('/api/cards/' + s.id + '/images/' + cover.id) : null,
     fallbackImage: null,
     period: (schema.cover && schema.cover.eyebrow) || 'Scheda didattica',
     featured: false
@@ -527,6 +530,8 @@ function dbSchedaPayload(id) {
     id: full.id,
     titolo: full.titolo,
     stato: full.stato,
+    verbosita: full.verbosita,
+    istruzione: full.istruzione,
     modello,
     sezioni,
     immagini: (full.immagini || []).map((m) => ({ ...m, url: '/api/cards/' + full.id + '/images/' + m.id }))
@@ -747,7 +752,7 @@ export function createAppServer() { return createServer((req, res) => { if (req.
       } catch (e) {}
       return sendImage(res, img);
     }
-    // ---------- PDF "libro d'arte" in sola lettura (stessi builder del creator) ----------
+    // ---------- PDF schede in sola lettura (stessi builder del creator) ----------
     if ((req.method === 'GET' || req.method === 'HEAD') && req.url && /^\/api\/artworks\/[^/]+\/pdf$/.test(req.url)) {
       const id = decodeURIComponent(req.url.split('/')[3]);
       let full = null;

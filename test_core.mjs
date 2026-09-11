@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   SECTION_TYPES, emptyBodyFor, validateBody, isBodyEmpty,
   validateModel, listMaterie, listModelli, getModello, buildSectionPrompt,
+  assembleSectionPrompts, VERBOSITA, ISTRUZIONE, normVerbosita, normIstruzione, scaledMaxWords,
 } from './core/index.mjs';
 
 test('sectionTypes: i 7 tipi condividono il vocabolario ARCHITECTURE.md', () => {
@@ -578,13 +579,15 @@ test('generate sezione: percorso completo con OpenRouter simulato (regressione n
   process.env.NOESIS_CREATOR_DB = dbPath;
   let child, stub;
   try {
-    // Stub OpenRouter: risposta JSON valida per la sezione nuclei.
+    // Stub OpenRouter: risposta JSON valida per la sezione nuclei + cattura request.
     let calls = 0;
+    let lastBody = null;
     stub = httpServer((req, res) => {
       let body = '';
       req.on('data', (c) => { body += c; });
       req.on('end', () => {
         calls += 1;
+        try { lastBody = JSON.parse(body); } catch { lastBody = null; }
         const payload = { choices: [{ message: { content: '{"items":[{"title":"Critica","text":"Limiti della ragione."},{"title":"Etica","text":"Agisci per dovere."}]}', annotations: [] } }] };
         const data = Buffer.from(JSON.stringify(payload));
         res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': data.length });
@@ -631,7 +634,19 @@ test('generate sezione: percorso completo con OpenRouter simulato (regressione n
     assert.equal(r.body.section.corpo.items[0].title, 'Critica');
     assert.equal(r.body.section.model, 'filosofia:autore-pensiero:v1');
     assert.ok(/^v1:[0-9a-f]{8}$/.test(r.body.section.promptVersion), 'timbro prompt_version');
+    assert.equal(r.body.section.verbosita, 'standard', 'timbro default verbosita');
+    assert.equal(r.body.section.istruzione, 'secondaria', 'timbro default istruzione');
     assert.equal(calls, 1);
+    assert.equal(lastBody.messages[0].role, 'system', 'contratto in system role');
+    // seconda scheda con livelli custom: timbri + versione diversi
+    r = await asJson('POST', '/api/cards', { id: 'gen-2', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K', verbosita: 'essenziale', istruzione: 'primaria' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.card.verbosita, 'essenziale');
+    r = await asJson('POST', '/api/cards/gen-2/generate/nuclei', {});
+    assert.equal(r.status, 200);
+    assert.equal(r.body.section.verbosita, 'essenziale');
+    assert.equal(r.body.section.istruzione, 'primaria');
+    assert.notEqual(r.body.section.promptVersion, (await asJson('GET', '/api/cards/gen-1')).body.sezioni.find((s) => s.chiave === 'nuclei').promptVersion, 'versioni diverse per livelli diversi');
     // Rilettura: la sezione è persistita
     r = await asJson('GET', '/api/cards/gen-1');
     assert.ok(r.body.sezioni.some((s) => s.chiave === 'nuclei' && s.corpo.items.length === 2));
@@ -879,4 +894,200 @@ test('audit prompt: vincoli, anti-allucinazione, niente groups', async () => {
   const titoli = [];
   for (const [, mod] of all) for (const s of mod.sections) if (s.key === 'curiosita') titoli.push(s.title);
   assert.ok(titoli.every((t) => t === 'Curiosità' || t === 'Edizioni e curiosità'), 'titoli curiosità uniformi: ' + [...new Set(titoli)].join('|'));
+});
+
+test('livelli: assembly, scaling e versioni distinte', () => {
+  assert.deepEqual(VERBOSITA, ['essenziale', 'standard', 'approfondita']);
+  assert.deepEqual(ISTRUZIONE, ['primaria', 'secondaria', 'universita']);
+  assert.equal(normVerbosita('APPROFONDITA'), 'approfondita');
+  assert.equal(normVerbosita('boh'), 'standard');
+  assert.equal(normIstruzione(''), 'secondaria');
+  assert.equal(normIstruzione('medie'), 'secondaria');
+  assert.equal(scaledMaxWords(180, 'standard'), 180);
+  assert.equal(scaledMaxWords(180, 'essenziale'), 110);
+  assert.equal(scaledMaxWords(180, 'approfondita'), 290);
+  assert.equal(scaledMaxWords(undefined, 'essenziale'), null);
+  const mod = getModello('filosofia', 'autore-pensiero');
+  const vita = mod.sections.find((s) => s.key === 'vita');
+  const nuclei = mod.sections.find((s) => s.key === 'nuclei');
+  const versions = new Set();
+  for (const v of VERBOSITA) for (const i of ISTRUZIONE) {
+    const r = assembleSectionPrompts({ modello: mod, sezione: vita, verbosita: v, istruzione: i });
+    versions.add(r.version);
+    assert.equal(r.verbosita, v);
+    assert.equal(r.istruzione, i);
+  }
+  assert.equal(versions.size, 9, '3x3 versioni tutte distinte');
+  const ess = assembleSectionPrompts({ modello: mod, sezione: vita, verbosita: 'essenziale', istruzione: 'primaria' });
+  assert.ok(ess.user.includes('max 110 parole'));
+  assert.ok(ess.system.includes('primaria. Lessico semplice'));
+  assert.ok(ess.user.includes('Priorità alla brevità'));
+  const appr = assembleSectionPrompts({ modello: mod, sezione: nuclei, verbosita: 'approfondita' });
+  assert.ok(appr.user.includes('Numero di voci vincolante: 5-8'));
+  assert.ok(appr.user.includes('Sviluppa in ampiezza'));
+  const std = assembleSectionPrompts({ modello: mod, sezione: nuclei });
+  assert.ok(std.user.includes('max 180 parole') === false); // nuclei non ha maxWords
+  assert.ok(std.user.includes('Numero di voci vincolante: 3-5'));
+  assert.ok(std.system.includes('secondaria. Lessico scolastico'));
+  // image: livelli timbrati ma contenuto invariato
+  const img = assembleSectionPrompts({ modello: getModello('arte', 'opera'), sezione: { key: 'tavola', title: 'T', type: 'image' }, verbosita: 'essenziale' });
+  assert.ok(img.version !== assembleSectionPrompts({ modello: getModello('arte', 'opera'), sezione: { key: 'tavola', title: 'T', type: 'image' } }).version);
+});
+
+test('db livelli: default, timbri, stale-gate, preserve manuale, migrazione', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'noesis-liv-'));
+  const dbPath = join(dir, 'liv.db');
+  const previous = process.env.NOESIS_CREATOR_DB;
+  process.env.NOESIS_CREATOR_DB = dbPath;
+  try {
+    const db = await import('./noesis-roads-creator/db.mjs?t=' + Date.now());
+    const core = await import('./core/index.mjs?t=' + Date.now());
+    db.initSchema();
+    db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia'), ...core.listModelli('letteratura-italiana')] });
+    // default = comportamento attuale
+    const dflt = db.createScheda({ id: 'lv-1', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K' });
+    assert.equal(dflt.verbosita, 'standard');
+    assert.equal(dflt.istruzione, 'secondaria');
+    // valori custom + normalizzazione
+    const custom = db.createScheda({ id: 'lv-2', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K', verbosita: 'ESSENZIALE', istruzione: 'primaria' });
+    assert.equal(custom.verbosita, 'essenziale');
+    assert.equal(custom.istruzione, 'primaria');
+    const bad = db.createScheda({ id: 'lv-3', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K', verbosita: 'x', istruzione: 'y' });
+    assert.equal(bad.verbosita, 'standard');
+    // generate timbra, manuale preserva
+    db.saveSezione('lv-2', 'vita', { text: 'Vita.' }, { model: 'm', promptVersion: 'v1:abc', verbosita: 'essenziale', istruzione: 'primaria' });
+    let s = db.getSezione('lv-2', 'vita');
+    assert.equal(s.verbosita, 'essenziale');
+    db.saveSezione('lv-2', 'vita', { text: 'Vita rivista a mano.' });
+    s = db.getSezione('lv-2', 'vita');
+    assert.equal(s.verbosita, 'essenziale', 'salvataggio manuale preserva i timbri');
+    assert.equal(s.corpo.text, 'Vita rivista a mano.');
+    db.saveSezione('lv-2', 'nuclei', { items: [{ title: 'T', text: 'x' }] }, { model: 'm', promptVersion: 'v1:abc', verbosita: 'essenziale', istruzione: 'primaria' });
+    db.saveSezione('lv-2', 'opere', { works: [{ title: 'W', artist: 'A' }] }, { model: 'm', promptVersion: 'v1:abc', verbosita: 'essenziale', istruzione: 'primaria' });
+    assert.equal(db.approveScheda('lv-2').ok, true);
+    // cambio livelli -> stale bloccante
+    db.updateScheda('lv-2', { verbosita: 'approfondita' });
+    const blocked = db.approveScheda('lv-2');
+    assert.equal(blocked.ok, false);
+    assert.deepEqual(blocked.stale.sort(), ['nuclei', 'opere', 'vita']);
+    assert.deepEqual(blocked.missing.sort(), ['nuclei', 'opere', 'vita']);
+    // rigenera una sola: resta bloccata sulle altre
+    db.saveSezione('lv-2', 'vita', { text: 'Vita lunga.' }, { model: 'm', promptVersion: 'v1:def', verbosita: 'approfondita', istruzione: 'primaria' });
+    const blocked2 = db.approveScheda('lv-2');
+    assert.equal(blocked2.ok, false);
+    assert.deepEqual(blocked2.stale.sort(), ['nuclei', 'opere']);
+    // sezione manuale (senza timbro) non diventa mai stale
+    db.createScheda({ id: 'lv-4', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K', verbosita: 'essenziale', istruzione: 'primaria' });
+    db.saveSezione('lv-4', 'vita', { text: 'A mano.' });
+    db.saveSezione('lv-4', 'nuclei', { items: [{ title: 'T', text: 'x' }] });
+    db.saveSezione('lv-4', 'opere', { works: [{ title: 'W', artist: 'A' }] });
+    db.updateScheda('lv-4', { verbosita: 'approfondita', istruzione: 'universita' });
+    assert.equal(db.approveScheda('lv-4').ok, true, 'contenuti manuali sempre validi');
+    // migrazione: DB vecchio senza colonne -> initSchema le aggiunge
+    db.getDb().exec('ALTER TABLE schede_lezione DROP COLUMN verbosita');
+    db.getDb().exec('ALTER TABLE sezioni DROP COLUMN istruzione');
+    db.initSchema();
+    const cols = db.getDb().prepare('PRAGMA table_info(schede_lezione)').all().map((c) => c.name);
+    assert.ok(cols.includes('verbosita') && cols.includes('istruzione'));
+    const zcols = db.getDb().prepare('PRAGMA table_info(sezioni)').all().map((c) => c.name);
+    assert.ok(zcols.includes('verbosita') && zcols.includes('istruzione'));
+    const after = db.createScheda({ id: 'lv-5', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K' });
+    assert.equal(after.verbosita, 'standard');
+  } finally {
+    if (previous === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previous;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('API livelli: validazione, PATCH, preview, stale-gate', async () => {
+  const { mkdtemp: mkd6, rm: rmDir6 } = await import('node:fs/promises');
+  const { tmpdir: tmpDir6 } = await import('node:os');
+  const { join: joinPath6 } = await import('node:path');
+  const { fork: forkProc6 } = await import('node:child_process');
+  const { writeFile: writeTmp6 } = await import('node:fs/promises');
+  const dir = await mkd6(joinPath6(tmpDir6(), 'noesis-lvlapi-'));
+  const dbPath = joinPath6(dir, 'l.db');
+  const previousDb = process.env.NOESIS_CREATOR_DB;
+  process.env.NOESIS_CREATOR_DB = dbPath;
+  let child;
+  try {
+    const serverAbs = joinPath6(process.cwd(), 'noesis-roads-creator', 'server.mjs');
+    const tmpScript = joinPath6(dir, 'spawn.mjs');
+    await writeTmp6(tmpScript, [
+      `import { createCreatorServer } from 'file://${serverAbs}';`,
+      'const s = createCreatorServer();',
+      's.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port) + "\\n"); });',
+    ].join('\n'));
+    child = forkProc6(tmpScript, [], { env: { ...process.env, NOESIS_CREATOR_DB: dbPath }, silent: true });
+    const port = await new Promise((resolve, reject) => {
+      let out = '';
+      const timer = setTimeout(() => reject(new Error('timeout subserver')), 15000);
+      child.stdout.on('data', (c) => {
+        out += String(c);
+        const nl = out.indexOf('\n');
+        if (nl >= 0) { clearTimeout(timer); resolve(Number(out.slice(0, nl).trim())); }
+      });
+      child.on('error', (e) => { clearTimeout(timer); reject(e); });
+      child.on('exit', (code) => { clearTimeout(timer); reject(new Error('subserver uscito, codice ' + code)); });
+    });
+    const base = 'http://127.0.0.1:' + port;
+    const asJson = (method, path, body) => fetch(base + path, {
+      method, headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+
+    let r = await asJson('POST', '/api/cards', { id: 'lv-bad', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'X', verbosita: ' prolissa ' });
+    assert.equal(r.status, 400);
+    r = await asJson('POST', '/api/cards', { id: 'lv-bad', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'X', istruzione: 'medie' });
+    assert.equal(r.status, 400);
+    r = await asJson('POST', '/api/cards', { id: 'lv-ok', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'X', verbosita: 'approfondita', istruzione: 'universita' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.card.verbosita, 'approfondita');
+    assert.equal(r.body.card.istruzione, 'universita');
+    r = await asJson('PATCH', '/api/cards/lv-ok', { verbosita: 'nope' });
+    assert.equal(r.status, 400);
+    r = await asJson('PATCH', '/api/cards/inesistente', { verbosita: 'essenziale' });
+    assert.equal(r.status, 404);
+    r = await asJson('PATCH', '/api/cards/lv-ok', { verbosita: 'essenziale' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.card.verbosita, 'essenziale');
+    // preview con livelli
+    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero%3Av1&sezione=vita&verbosita=essenziale&istruzione=primaria');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.user.includes('max 110 parole'));
+    assert.ok(r.body.system.includes('primaria. Lessico semplice'));
+    assert.equal(r.body.verbosita, 'essenziale');
+    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero%3Av1&sezione=vita');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.user.includes('max 180 parole'));
+    // generate verso endpoint chiuso -> 500 (mappa errori LLM)
+    child.kill('SIGTERM');
+    await new Promise((r2) => setTimeout(r2, 100));
+    const child2 = forkProc6(tmpScript, [], { env: { ...process.env, NOESIS_CREATOR_DB: dbPath, OPENROUTER_API_KEY: 'k', OPENROUTER_ENDPOINT: 'http://127.0.0.1:1/chiuso' }, silent: true });
+    const port2 = await new Promise((resolve, reject) => {
+      let out = '';
+      const timer = setTimeout(() => reject(new Error('timeout subserver')), 15000);
+      child2.stdout.on('data', (c) => {
+        out += String(c);
+        const nl = out.indexOf('\n');
+        if (nl >= 0) { clearTimeout(timer); resolve(Number(out.slice(0, nl).trim())); }
+      });
+      child2.on('error', (e) => { clearTimeout(timer); reject(e); });
+      child2.on('exit', (code) => { clearTimeout(timer); reject(new Error('subserver uscito, codice ' + code)); });
+    });
+    try {
+      const rErr = await fetch(`http://127.0.0.1:${port2}/api/cards/lv-ok/generate/vita`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      assert.equal(rErr.status, 500);
+    } finally {
+      try { child2.kill('SIGKILL'); } catch {}
+    }
+  } finally {
+    if (child) {
+      try { child.kill('SIGTERM'); } catch {}
+      await new Promise((r2) => setTimeout(r2, 50));
+      try { child.kill('SIGKILL'); } catch {}
+    }
+    if (previousDb === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previousDb;
+    await rmDir6(dir, { recursive: true, force: true });
+  }
 });

@@ -46,6 +46,21 @@ API `/api/models`, versioni con fork: mai UPDATE con schede esistenti).
 - Validazione: tipi noti, chiavi uniche, almeno una sezione, cover con ruoli
   immagine esistenti.
 
+## Livelli di generazione (verbosità × istruzione)
+
+Ogni scheda sceglie in testata `verbosita` (`essenziale|standard|approfondita`,
+default `standard`) e `istruzione` (`primaria|secondaria|universita`, default
+`secondaria`); valori fuori whitelist → 400. La verbosità scala i vincoli
+(`maxWords` ×0,6/×1/×1,6; voci 2–3/3–5/5–8 per `points`/`kv`, 3–4/4–8/6–10 per
+`works`, 3–4/5–6/6–8 per `epochs`) con riga vincolante che prevale sui numeri
+del frammento; l'istruzione aggiunge il registro (lessico/profondità) nel
+system. `image` non genera testo e ignora i livelli nel contenuto.
+`prompt_version` include entrambi i livelli; ogni sezione generata timbra
+`verbosita`/`istruzione` (il salvataggio manuale preserva i timbri, `''` =
+contenuto umano, sempre valido). Cambio livelli consentito ma **invalidante**:
+le required generate con altri livelli risultano `stale` e bloccano l'approve
+(`rigenera: <chiavi>`) finché rigenerate; `✨ Genera mancanti` le include.
+
 ## Mappatura dei modelli arte (riferimento per lo snapshot)
 
 - `opera` → sezioni: presentazione (`text`×2), tavola (`image` fullpage),
