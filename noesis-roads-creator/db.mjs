@@ -896,6 +896,12 @@ export function upsertModello({ materiaId, chiave, nome, versione = 1, schema })
   if (!String(chiave || '').trim()) throw new Error('modello.chiave obbligatorio');
   if (!getMateria(materiaId)) throw new Error(`materia sconosciuta: ${materiaId}`);
   const id = modelloIdStabile(materiaId, chiave, versione);
+  // Come per systemPrompt: il seed a ogni avvio non deve mai sovrascrivere lo
+  // schema di un modello con schede (congelato). Solo il nome si aggiorna.
+  if (modelHasCards(id)) {
+    getDb().prepare('UPDATE modelli_scheda SET nome = ? WHERE id = ?').run(nome || '', id);
+    return getModello(id);
+  }
   getDb().prepare(`INSERT INTO modelli_scheda (id, materia_id, chiave, nome, versione, schema_json) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, schema_json=excluded.schema_json`)
     .run(id, materiaId, chiave, nome || '', versione, JSON.stringify(schema || {}));

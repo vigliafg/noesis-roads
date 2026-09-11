@@ -23,7 +23,7 @@ API `/api/models`, versioni con fork: mai UPDATE con schede esistenti).
       "maxWords": 180,
       "prompt": "Istruzioni LLM specifiche della sezione…"
     },
-    { "key": "nuclei", "title": "I nuclei del pensiero", "type": "points", "groups": ["nuclei"], "required": true },
+    { "key": "nuclei", "title": "I nuclei del pensiero", "type": "points", "required": true },
     { "key": "opere", "title": "Opere chiave", "type": "works", "withImages": true },
     { "key": "concetti", "title": "Concetti e glossario", "type": "kv", "required": false },
     { "key": "questioni", "title": "Questioni aperte", "type": "text", "required": false }

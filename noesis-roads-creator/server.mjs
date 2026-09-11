@@ -943,11 +943,25 @@ function handleApi(req, res, urlPath) {
     return errs;
   }
 
-  // GET /api/models?subject=filosofia — modelli di una materia (schemi completi per l'editor generico)
+  // GET /api/models?subject=filosofia[&standard=1] — modelli di una materia.
+  // standard=1: solo l'ultima versione valida per chiave (i 4 modelli standard
+  // per la creazione; bozze e vecchie versioni escluse).
   if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'models') {
-    const subject = new URL(req.url, 'http://localhost').searchParams.get('subject') || '';
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const subject = q.get('subject') || '';
     if (!subject) return err(res, 400, 'Parametro subject obbligatorio (es. ?subject=filosofia)');
-    return json(res, 200, { models: listModelli(subject) });
+    let models = listModelli(subject);
+    if (q.get('standard') === '1') {
+      const latest = new Map();
+      for (const m of models) {
+        const cur = latest.get(m.chiave);
+        if (!cur || m.versione > cur.versione) latest.set(m.chiave, m);
+      }
+      models = [...latest.values()].filter((m) => validateModel({
+        ...m.schema, key: m.chiave, subject: m.materiaId, name: m.nome, version: m.versione,
+      }).length === 0 && m.schema.nascondiCreazione !== true);
+    }
+    return json(res, 200, { models });
   }
 
   // POST /api/models { materiaId, chiave?, nome, fromTemplate? } — nuovo modello v1 (wizard).

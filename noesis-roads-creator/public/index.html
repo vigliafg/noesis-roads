@@ -2222,7 +2222,7 @@ function refreshCardMaterie() {
   api('/api/materie').then(function (r) {
     s.materie = r.materie || [];
     if (!s.materiaId && s.materie.length) s.materiaId = s.materie[0].id;
-    if (s.materiaId) return api('/api/models?subject=' + encodeURIComponent(s.materiaId)).then(function (m) {
+    if (s.materiaId) return api('/api/models?subject=' + encodeURIComponent(s.materiaId) + '&standard=1').then(function (m) {
       s.modelli = m.models || [];
       render();
     });
@@ -2241,7 +2241,7 @@ function newCardStudio(modelloId) {
   render();
   var ensure = function () {
     if (cardStudio.modelli.length) { render(); return; }
-    api('/api/models?subject=' + encodeURIComponent(cardStudio.materiaId)).then(function (m) {
+    api('/api/models?subject=' + encodeURIComponent(cardStudio.materiaId) + '&standard=1').then(function (m) {
       cardStudio.modelli = m.models || [];
       render();
     }).catch(function (e) { toast(e.message); });
@@ -2356,6 +2356,7 @@ function renderCardStudio() {
     html += '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:20px">' +
       '<button class="btn primary" id="csGenAll" style="padding:14px 22px">⚡ Genera tutte le sezioni</button>' +
       '<button class="btn" id="csGenMissing" style="padding:14px 22px">✨ Genera mancanti</button>' +
+      '<button class="btn" id="csSaveAll" style="padding:14px 22px">💾 Salva tutto</button>' +
       '<button class="btn green" id="csApprove" style="padding:14px 22px">✅ Approva</button>' +
       '<button class="btn ghost" id="csDelete">🗑 Elimina</button>' +
       '<span class="step-note" id="csNote">Genera o compila le sezioni, salva ciascuna, poi approva.</span></div>';
@@ -2462,7 +2463,7 @@ function bindCardStudio(s) {
   if (mat) mat.onchange = function () {
     s.materiaId = mat.value; s.modelloId = ''; s.modelli = [];
     if (!s.id) {
-      api('/api/models?subject=' + encodeURIComponent(s.materiaId)).then(function (m) {
+      api('/api/models?subject=' + encodeURIComponent(s.materiaId) + '&standard=1').then(function (m) {
         s.modelli = m.models || [];
         if (s.modelli.length) s.modelloId = s.modelli[0].id || (s.modelli[0].materiaId + ':' + s.modelli[0].chiave + ':v' + s.modelli[0].versione);
         s.checked = null;
@@ -2605,6 +2606,8 @@ function bindCardStudio(s) {
   };
   var miss = document.getElementById('csGenMissing');
   if (miss) miss.onclick = function () { cardGenAll(s, miss, true); };
+  var saveAll = document.getElementById('csSaveAll');
+  if (saveAll) saveAll.onclick = function () { cardSaveAll(s, saveAll); };
   var approve = document.getElementById('csApprove');
   if (approve) approve.onclick = function () {
     approve.disabled = true;
@@ -2656,6 +2659,24 @@ function cardIsEmpty(type, corpo) {
   }
   if (type === 'image') return !String(b.caption || '').trim();
   return false;
+}
+function cardSaveAll(s, btn) {
+  // Salva in sequenza tutte le sezioni attive (testi scritti a mano compresi).
+  var defs = cardActiveDefs(s);
+  var i = 0;
+  var old = btn.innerHTML;
+  btn.disabled = true;
+  var step = function () {
+    if (i >= defs.length) { btn.disabled = false; btn.innerHTML = old; toast('Tutte le sezioni salvate', true); return; }
+    var key = defs[i].key;
+    btn.innerHTML = '💾 Salvataggio ' + (i + 1) + '/' + defs.length + '…';
+    patch('/api/cards/' + encodeURIComponent(s.id) + '/sections/' + encodeURIComponent(key), { corpo: s.corpi[key] }).then(function (r) {
+      if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
+      i += 1;
+      step();
+    }).catch(function (e) { btn.disabled = false; btn.innerHTML = old; toast('Sezione ' + key + ': ' + e.message); });
+  };
+  step();
 }
 function cardGenAll(s, btn, onlyMissing) {
   var defs = cardActiveDefs(s).filter(function (d) { return d.type !== 'image'; });
@@ -3077,9 +3098,9 @@ function refreshList() {
     state.materie = results[4].materie || [];
     state.view = 'home';
     render();
-    // Modelli per materia (bottoni di creazione guidata): in parallelo, senza bloccare la home.
+    // Modelli per materia (bottoni di creazione guidata: solo standard): in parallelo, senza bloccare la home.
     state.materie.forEach(function (m) {
-      api('/api/models?subject=' + encodeURIComponent(m.id)).then(function (r) {
+      api('/api/models?subject=' + encodeURIComponent(m.id) + '&standard=1').then(function (r) {
         state.modelliPerMateria[m.id] = r.models || [];
         if (state.view === 'home') render();
       }).catch(function () {});

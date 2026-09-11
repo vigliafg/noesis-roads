@@ -770,6 +770,20 @@ test('API wizard: materie/modelli/sezioni/fork + sezioniAttive + preview', async
     r = await asJson('PATCH', '/api/cards/mw-sub', { sezioniAttive: ['vita', 'nuclei', 'opere', 'concetti'] });
     assert.equal(r.status, 400); // ready: attive congelate
 
+    // --- standard=1: solo ultima versione valida (niente bozze, niente vecchie) ---
+    r = await asJson('POST', '/api/models', { materiaId: 'filosofia', nome: 'Vuota' });
+    assert.equal(r.status, 201); // draft senza sezioni
+    r = await asJson('GET', '/api/models?subject=filosofia&standard=1');
+    assert.equal(r.status, 200);
+    const stdKeys = r.body.models.map((m) => m.chiave + ':v' + m.versione);
+    assert.ok(!stdKeys.includes('bozza:v1'), 'bozza vuota esclusa');
+    assert.ok(!stdKeys.includes('autore-pensiero:v1'), 'legacy nascosto alla creazione');
+    assert.deepEqual(stdKeys.filter((k) => k.startsWith('autore:')), ['autore:v1'], 'solo autore standard');
+    assert.ok(stdKeys.filter((k) => k.startsWith('autore-pensiero:')).length <= 1, 'una sola versione per chiave');
+    assert.ok(stdKeys.includes('autore:v1') || stdKeys.includes('autore-pensiero:v1'), 'standard presenti: ' + stdKeys.join(','));
+    const v1count = r.body.models.filter((m) => m.id === 'filosofia:autore-pensiero:v1').length;
+    assert.ok(v1count <= 1, 'nessun duplicato di versione');
+
     // --- preview prompt ---
     r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero%3Av1&sezione=nuclei');
     assert.equal(r.status, 200);
@@ -811,4 +825,58 @@ test('pair con immagini: builder PDF usa coppia-a/b (fallback lato-a/b)', async 
   p = buildGenericPdfPayload(mk([]), ioOf([]));
   pair = p.sections.find((s) => s.t === 'pair');
   assert.equal(pair.a.image, null);
+});
+
+test('seed guard: schema congelato con schede, libero senza', async () => {
+  const { mkdtemp: mkd7, rm: rmDir7 } = await import('node:fs/promises');
+  const { tmpdir: tmpDir7 } = await import('node:os');
+  const { join: joinPath7 } = await import('node:path');
+  const dir = await mkd7(joinPath7(tmpDir7(), 'noesis-seedguard-'));
+  const dbPath = joinPath7(dir, 'g.db');
+  const previousDb = process.env.NOESIS_CREATOR_DB;
+  process.env.NOESIS_CREATOR_DB = dbPath;
+  try {
+    const db = await import('./noesis-roads-creator/db.mjs?t=sg' + Date.now());
+    db.initSchema();
+    db.upsertMateria({ id: 'm', nome: 'M' });
+    const schemaA = { key: 'k', subject: 'm', name: 'K', version: 1, cover: { eyebrow: 'E', heroRole: 'hero' }, sections: [{ key: 'a', title: 'A', type: 'text', prompt: 'uno' }] };
+    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K', versione: 1, schema: schemaA });
+    // senza schede: il seed aggiorna
+    const schemaB = { ...schemaA, sections: [{ key: 'a', title: 'A2', type: 'text', prompt: 'due' }] };
+    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K2', versione: 1, schema: schemaB });
+    assert.equal(db.getModello('m:k:v1').schema.sections[0].title, 'A2');
+    // con schede: nome sì, schema no
+    db.createScheda({ id: 's1', modelloId: 'm:k:v1', titolo: 'S' });
+    const schemaC = { ...schemaB, sections: [{ key: 'a', title: 'A3', type: 'text', prompt: 'tre' }] };
+    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K3', versione: 1, schema: schemaC });
+    const kept = db.getModello('m:k:v1');
+    assert.equal(kept.nome, 'K3');
+    assert.equal(kept.schema.sections[0].title, 'A2');
+  } finally {
+    if (previousDb === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previousDb;
+    await rmDir7(dir, { recursive: true, force: true });
+  }
+});
+
+test('audit prompt: vincoli, anti-allucinazione, niente groups', async () => {
+  const core = await import('./core/index.mjs?t=pa' + Date.now());
+  const all = [];
+  for (const mat of core.listMaterie()) for (const mod of core.listModelli(mat.id)) all.push([mat.id, mod]);
+  assert.ok(all.length >= 12, 'tutti i modelli del registry');
+  for (const [mat, mod] of all) {
+    for (const s of mod.sections) {
+      assert.ok(s.prompt && s.prompt.trim(), `${mat}:${mod.key}#${s.key} prompt presente`);
+      assert.equal(s.groups, undefined, `${mat}:${mod.key}#${s.key} senza groups`);
+      if (s.type === 'points') assert.ok(/\d/.test(s.prompt), `${mat}:${mod.key}#${s.key} numerosità`);
+      if (s.type === 'kv') assert.ok(/\d/.test(s.prompt), `${mat}:${mod.key}#${s.key} numerosità`);
+    }
+  }
+  const get = (mat, key) => core.getModello(mat, key).sections;
+  const byKey = (secs, k) => secs.find((s) => s.key === k);
+  assert.ok(byKey(get('arte', 'opera'), 'dettagli').prompt.includes('4-6'));
+  assert.ok(byKey(get('arte', 'soggetto'), 'opere').prompt.includes('6-10'));
+  assert.ok(byKey(get('arte', 'confronto'), 'coppia').prompt.includes('collocazione'));
+  const titoli = [];
+  for (const [, mod] of all) for (const s of mod.sections) if (s.key === 'curiosita') titoli.push(s.title);
+  assert.ok(titoli.every((t) => t === 'Curiosità' || t === 'Edizioni e curiosità'), 'titoli curiosità uniformi: ' + [...new Set(titoli)].join('|'));
 });
