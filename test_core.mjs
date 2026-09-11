@@ -31,11 +31,11 @@ test('modelSpec: modello valido passa, modello rotto elenca gli errori', () => {
   assert.ok(validateModel({ key: 'x', subject: 's', name: 'n', version: 1, cover: { eyebrow: 'e', heroRole: 'h' }, sections: [] }).some((e) => e.includes('almeno una')));
 });
 
-test('models: 3 materie (3+4+2 modelli), tutti validi', () => {
+test('models: 3 materie (5+6+5 modelli), tutti validi', () => {
   assert.deepEqual(listMaterie().map((m) => m.id), ['arte', 'filosofia', 'letteratura-italiana']);
-  assert.deepEqual(listModelli('letteratura-italiana').map((m) => m.key), ['opera-letteraria', 'tematica-letteraria']);
-  assert.deepEqual(listModelli('filosofia').map((m) => m.key), ['autore-pensiero', 'tematica', 'opera-filosofica', 'confronto-filosofico']);
-  assert.deepEqual(listModelli('arte').map((m) => m.key), ['opera', 'soggetto', 'confronto']);
+  assert.deepEqual(listModelli('letteratura-italiana').map((m) => m.key), ['opera-letteraria', 'opera-letteraria', 'confronto-letterario', 'tematica-letteraria', 'autore']);
+  assert.deepEqual(listModelli('filosofia').map((m) => m.key), ['autore-pensiero', 'tematica', 'opera-filosofica', 'opera-filosofica', 'confronto-filosofico', 'autore']);
+  assert.deepEqual(listModelli('arte').map((m) => m.key), ['opera', 'opera', 'soggetto', 'confronto', 'autore']);
   for (const materia of ['arte', 'filosofia', 'letteratura-italiana']) {
     for (const m of listModelli(materia)) assert.deepEqual(validateModel(m), [], `modello ${materia}:${m.key}`);
   }
@@ -66,9 +66,9 @@ test('db nucleo: seed + scheda + gate required + immagini + RO', async () => {
     db.initSchema();
     const seeded = db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia'), ...core.listModelli('letteratura-italiana')] });
     assert.equal(seeded.materie, 3);
-    assert.equal(seeded.modelli, 9);
+    assert.equal(seeded.modelli, 16);
     assert.equal(db.listMaterie().length, 3);
-    assert.equal(db.listModelli('filosofia').length, 4);
+    assert.equal(db.listModelli('filosofia').length, 6);
     db.updateMateria('filosofia', { systemPrompt: 'Tono custom.' });
     db.seedCore({ materie: core.listMaterie(), modelli: [] });
     assert.equal(db.getMateria('filosofia').systemPrompt, 'Tono custom.'); // il seed non sovrascrive
@@ -213,7 +213,7 @@ test('API generiche /api/materie /models /cards: CRUD, gate, immagini, PDF', asy
     assert.equal(r.status, 400); // subject obbligatorio
     r = await asJson('GET', '/api/models?subject=filosofia');
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.models.map((m) => m.chiave || m.schema.key), ['autore-pensiero', 'confronto-filosofico', 'opera-filosofica', 'tematica']);
+    assert.deepEqual(r.body.models.map((m) => m.chiave || m.schema.key), ['autore', 'autore-pensiero', 'confronto-filosofico', 'opera-filosofica', 'opera-filosofica', 'tematica']);
 
     // Nuova scheda: modello ignoto -> 400; ok -> 201; stesso id -> 409
     const modelloId = 'filosofia:autore-pensiero:v1';
@@ -370,7 +370,7 @@ test('Viewer generico: /api/materie /models /cards + immagini (sola lettura)', a
     assert.equal(res.status, 400);
     res = await fetch(base + '/api/models?subject=filosofia');
     assert.equal(res.status, 200);
-    assert.equal((await res.json()).models.length, 4);
+    assert.equal((await res.json()).models.length, 6);
 
     res = await fetch(base + '/api/cards/kant-v');
     assert.equal(res.status, 200);

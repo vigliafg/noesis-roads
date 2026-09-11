@@ -12,6 +12,52 @@ export const MATERIE = Object.freeze([
     systemPrompt: 'Sei uno storico della letteratura italiana rigoroso e chiaro: date, opere e testi attestati, mai inventare citazioni.' },
 ]);
 
+function autoreModels() {
+  // Tipo 1 unificato: stesse chiavi/tipi/required, prompt per materia.
+  // Filosofia si chiama "Il filosofo e il suo pensiero" (variante nominale).
+  return [
+    {
+      key: 'autore', subject: 'arte', name: "L'autore e le sue opere", version: 1,
+      cover: { eyebrow: "Scheda didattica · storia dell'arte", heroRole: 'ritratto' },
+      sections: [
+        { key: 'biografia', title: 'Biografia', type: 'text', required: true, maxWords: 180, prompt: 'Date, luoghi, formazione e botteghe, spostamenti; solo dati attestati, 120-180 parole.' },
+        { key: 'contesto', title: 'Il contesto', type: 'text', required: true, maxWords: 200, prompt: 'Contesto artistico: correnti, committenti, città e corti; rapporto col tempo.' },
+        { key: 'opere', title: 'Opere principali', type: 'works', withImages: true, required: true, prompt: 'Opere principali 4-8 con galleria: titolo, data, tecnica e collocazione, perché conta (max 25 parole).' },
+        { key: 'pensiero', title: 'Il pensiero e la poetica', type: 'points', required: true, prompt: 'Nuclei dello stile e della poetica visiva: 3-5 voci, una tesi per voce, solo tratti attestati dalle opere.' },
+        { key: 'tematiche', title: 'Temi ricorrenti', type: 'points', required: false, prompt: "Temi ricorrenti (soggetti, motivi, simboli): 3-5 voci, una per voce con esempio d'opera." },
+        { key: 'citazioni', title: 'Citazioni', type: 'points', required: false, prompt: "Dichiarazioni d'artista verificabili, 2-4, con fonte." },
+        { key: 'questioni', title: 'Questioni aperte', type: 'text', required: false, maxWords: 180, prompt: 'Dibattiti critici reali.' },
+      ],
+    },
+    {
+      key: 'autore', subject: 'filosofia', name: 'Il filosofo e il suo pensiero', version: 1,
+      cover: { eyebrow: 'Scheda didattica · filosofia', heroRole: 'ritratto' },
+      sections: [
+        { key: 'biografia', title: 'Biografia', type: 'text', required: true, maxWords: 180, prompt: 'Date, luoghi, formazione, maestri; solo dati attestati, 120-180 parole.' },
+        { key: 'contesto', title: 'Il contesto', type: 'text', required: true, maxWords: 200, prompt: 'Contesto filosofico: scuole, dibattiti, interlocutori del tempo.' },
+        { key: 'opere', title: 'Opere principali', type: 'works', withImages: true, required: true, prompt: 'Opere principali 4-8: titolo, data, tesi centrale in una riga (max 25 parole).' },
+        { key: 'pensiero', title: 'Il pensiero', type: 'points', required: true, prompt: 'Nuclei del pensiero: 3-5 voci, una tesi per voce, 40-70 parole, solo dottrine attestate.' },
+        { key: 'tematiche', title: 'Temi ricorrenti', type: 'points', required: false, prompt: 'Temi ricorrenti del pensiero: 3-5 voci, una per voce con rinvio alle opere.' },
+        { key: 'citazioni', title: 'Citazioni', type: 'points', required: false, prompt: 'Passi verificabili, 2-4, con opera di provenienza.' },
+        { key: 'questioni', title: 'Questioni aperte', type: 'text', required: false, maxWords: 180, prompt: 'Dibattiti storiografici reali.' },
+      ],
+    },
+    {
+      key: 'autore', subject: 'letteratura-italiana', name: "L'autore e le sue opere", version: 1,
+      cover: { eyebrow: 'Scheda didattica · Letteratura Italiana', heroRole: 'ritratto' },
+      sections: [
+        { key: 'biografia', title: 'Biografia', type: 'text', required: true, maxWords: 180, prompt: 'Date, luoghi, formazione, mestieri e committenze; solo dati attestati, 120-180 parole.' },
+        { key: 'contesto', title: 'Il contesto', type: 'text', required: true, maxWords: 200, prompt: 'Contesto letterario: generi dominanti, corti ed editoria, interlocutori.' },
+        { key: 'opere', title: 'Opere principali', type: 'works', withImages: true, required: true, prompt: 'Opere principali 4-8: titolo, data, genere, perché conta (max 25 parole).' },
+        { key: 'pensiero', title: 'La poetica', type: 'points', required: true, prompt: 'Nuclei della poetica: 3-5 voci su temi, stile e lingua, attestati dalle opere.' },
+        { key: 'tematiche', title: 'Temi ricorrenti', type: 'points', required: false, prompt: 'Temi ricorrenti: 3-5 voci, una per voce con rinvio alle opere.' },
+        { key: 'citazioni', title: 'Citazioni', type: 'points', required: false, prompt: 'Versi o passaggi verificabili, 2-4, con opera di provenienza.' },
+        { key: 'questioni', title: 'Questioni aperte', type: 'text', required: false, maxWords: 180, prompt: 'Dibattiti filologici reali.' },
+      ],
+    },
+  ];
+}
+
 function artModels() {
   return [
     {
@@ -25,6 +71,20 @@ function artModels() {
         { key: 'tecnica', title: 'Tecnica e materia', type: 'text', required: false, maxWords: 120, prompt: 'Come è dipinta: materia, pennellata, colore, luci, supporto.' },
         { key: 'simili', title: 'Opere simili', type: 'works', withImages: true, required: false, prompt: 'Opere reali e celebri con lo stesso soggetto, con perché della somiglianza (max 25 parole).' },
         { key: 'fonti', title: 'Fonti', type: 'kv', required: false, prompt: 'Fonti editoriali: titolo e URL.' },
+      ],
+    },
+    {
+      key: 'opera', subject: 'arte', name: "L'opera", version: 2,
+      cover: { eyebrow: "Scheda didattica · storia dell'arte", heroRole: 'hero' },
+      sections: [
+        { key: 'argomento', title: "L'argomento", type: 'text', required: true, maxWords: 200, prompt: "Soggetto, committenza, iconografia essenziale e importanza dell'opera." },
+        { key: 'autore', title: "L'autore in breve", type: 'text', required: false, maxWords: 200, prompt: "L'autore in breve: formazione e ruolo; per la scheda completa vedi il modello autore." },
+        { key: 'genesi', title: 'Genesi e composizione', type: 'text', required: true, maxWords: 200, prompt: 'Quando e dove eseguita, per chi, committenza documentata.' },
+        { key: 'struttura', title: "Struttura e dettagli", type: 'points', required: true, prompt: 'Dettagli visivi notevoli in 4-6 voci: per ciascuno osservazione, significato e relazione.' },
+        { key: 'stile', title: 'Stile e tecnica', type: 'text', required: true, maxWords: 200, prompt: 'Materia, pennellata, colore, luci, supporto.' },
+        { key: 'tavola', title: 'Tavola', type: 'image', required: false, fullpage: true, prompt: "Tavola dell'opera a tutta pagina (nessun testo generato)." },
+        { key: 'fortuna', title: 'Fortuna e ricezione', type: 'epochs', required: false, prompt: 'Collocazioni, passaggi di proprietà e fortuna critica documentata, 4-6 capitoli.' },
+        { key: 'questioni', title: 'Questioni aperte', type: 'text', required: false, maxWords: 180, prompt: 'Attribuzioni e iconografia dibattute, solo fatti verificabili.' },
       ],
     },
     {
@@ -96,6 +156,20 @@ function philosophyModels() {
       ],
     },
     {
+      key: 'opera-filosofica', subject: 'filosofia', name: "L'opera filosofica", version: 2,
+      cover: { eyebrow: 'Scheda didattica · filosofia', heroRole: 'copertina' },
+      sections: [
+        { key: 'argomento', title: "La tesi dell'opera", type: 'text', required: true, maxWords: 200, prompt: "Tesi centrale dell'opera in breve; solo dottrine attestate, mai inventare." },
+        { key: 'genesi', title: 'Genesi e composizione', type: 'text', required: true, maxWords: 200, prompt: 'Quando e dove composta, contesto, edizione di riferimento.' },
+        { key: 'struttura', title: 'Struttura argomentativa', type: 'points', required: true, prompt: 'Argomentazione in 3-6 voci titolo+testo: parti o capitoli e loro funzione.' },
+        { key: 'stile', title: 'Stile e linguaggio', type: 'text', required: true, maxWords: 200, prompt: "Linguaggio e stile argomentativo dell'opera, con esempi brevi e verificabili." },
+        { key: 'concetti', title: 'Concetti chiave', type: 'kv', required: true, prompt: 'Concetti chiave 4-6: termine verso significato rigoroso.' },
+        { key: 'tavola', title: 'Tavola', type: 'image', required: false, prompt: 'Frontespizio o manoscritto (upload, nessun testo generato).' },
+        { key: 'fortuna', title: 'Fortuna e ricezione', type: 'epochs', required: false, prompt: 'Ricezione ed edizioni per epoche, 4-6 capitoli documentati.' },
+        { key: 'questioni', title: 'Questioni aperte', type: 'text', required: false, maxWords: 180, prompt: 'Dibattiti interpretativi reali.' },
+      ],
+    },
+    {
       key: 'confronto-filosofico', subject: 'filosofia', name: 'Il confronto tra due autori', version: 1,
       cover: { eyebrow: 'Scheda didattica · filosofia', heroRole: 'ritratto' },
       sections: [
@@ -127,6 +201,33 @@ function letteraturaModels() {
       ],
     },
     {
+      key: 'opera-letteraria', subject: 'letteratura-italiana', name: "L'opera letteraria", version: 2,
+      cover: { eyebrow: 'Scheda didattica · Letteratura Italiana', heroRole: 'copertina' },
+      sections: [
+        { key: 'argomento', title: "L'argomento", type: 'text', required: true, maxWords: 200, prompt: 'Argomento in breve: di cosa parla, antefatto essenziale, senza riassunto integrale; solo contenuti attestati.' },
+        { key: 'genesi', title: 'Genesi e composizione', type: 'text', required: true, maxWords: 200, prompt: "Quando e dove composta, per chi, dediche, revisioni e varianti d'autore documentate." },
+        { key: 'struttura', title: "Struttura dell'opera", type: 'points', required: true, prompt: 'Partizioni (canti, capitoli, atti) in 3-6 voci titolo+testo: cosa contiene ciascuna e la sua funzione.' },
+        { key: 'stile', title: 'Stile e lingua', type: 'text', required: true, maxWords: 200, prompt: 'Forma metrica o prosa, lingua, stilemi riconoscibili con esempi brevi e verificabili.' },
+        { key: 'tavola', title: 'Tavola', type: 'image', required: false, prompt: 'Copertina o manoscritto (upload, nessun testo generato).' },
+        { key: 'fortuna', title: 'Fortuna e ricezione', type: 'epochs', required: false, prompt: 'Per epoche, 4-6 capitoli: edizioni principali, giudizi e riusi documentati, mai inventare date.' },
+        { key: 'curiosita', title: 'Edizioni e curiosità', type: 'text', required: false, maxWords: 150, prompt: 'Questioni filologiche e aneddoti: solo fatti verificabili, mai inventare citazioni.' },
+      ],
+    },
+    {
+      key: 'confronto-letterario', subject: 'letteratura-italiana', name: 'Il confronto tra due autori', version: 1,
+      cover: { eyebrow: 'Scheda didattica · Letteratura Italiana', heroRole: 'ritratto' },
+      sections: [
+        { key: 'coppia', title: 'I due autori', type: 'pair', required: true, prompt: 'I due autori a confronto (ritratti): metadati essenziali per lato.' },
+        { key: 'introduzione', title: 'Introduzione', type: 'text', required: true, maxWords: 180, prompt: 'Introduzione al confronto: 120-180 parole.' },
+        { key: 'comuni', title: 'Punti in comune', type: 'points', required: true, prompt: 'Punti in comune: 3-5 voci titolo+testo.' },
+        { key: 'differenze', title: 'Differenze', type: 'points', required: true, prompt: 'Differenze: 4-6 voci titolo+testo.' },
+        { key: 'metodo', title: 'Metodo e stile', type: 'text', required: false, maxWords: 200, prompt: 'Metodo e stile a confronto.' },
+        { key: 'contesto', title: 'Contesto storico', type: 'text', required: false, maxWords: 200, prompt: 'Contesto storico dei due autori.' },
+        { key: 'sintesi', title: 'Sintesi critica', type: 'text', required: false, maxWords: 200, prompt: 'Sintesi critica del confronto.' },
+        { key: 'curiosita', title: 'Curiosità', type: 'text', required: false, maxWords: 150, prompt: 'Curiosità verificabili.' },
+      ],
+    },
+    {
       key: 'tematica-letteraria', subject: 'letteratura-italiana', name: 'Il tema letterario', version: 1,
       cover: { eyebrow: 'Scheda didattica · Letteratura Italiana', heroRole: 'hero' },
       sections: [
@@ -141,7 +242,7 @@ function letteraturaModels() {
   ];
 }
 
-const _MODELS = [...artModels(), ...philosophyModels(), ...letteraturaModels()];
+const _MODELS = [...artModels(), ...philosophyModels(), ...letteraturaModels(), ...autoreModels()];
 
 export function listMaterie() {
   return MATERIE.map((m) => ({ ...m }));

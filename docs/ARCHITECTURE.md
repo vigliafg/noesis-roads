@@ -67,3 +67,18 @@ GET       /api/models?subject=...       modelli di una materia
 Namespace deciso in Fase 2: `/api/materie` (non `/api/subjects`, occupato
 dalle schede soggetto arte legacy, intatte). Stesse rotte su creator
 (scrittura) e viewer (sola lettura delle `ready`).
+
+## Modelli omogenei (4 tipi × 3 materie)
+
+Chiavi condivise per tipo; solo i prompt (e i nomi) cambiano per materia.
+Extra dichiarati per materia: `autore`/`tavola` (arte), `concetti` (filosofia).
+
+| Tipo | Arte | Filosofia | Letteratura |
+|---|---|---|---|
+| Autore | `autore:v1` (biografia, contesto, opere, pensiero, tematiche, citazioni, questioni) | `autore:v1` "Il filosofo e il suo pensiero" (stesse chiavi) | `autore:v1` (stesse chiavi) |
+| Opera | `opera:v2` (argomento, autore, genesi, struttura, stile, tavola, fortuna, questioni; v1 legacy congelata) | `opera-filosofica:v2` (+concetti, +tavola) | `opera-letteraria:v2` (+tavola) |
+| Tema | `soggetto:v1` (parallelo 1:1, chiavi storiche) | `tematica:v1` (parallela) | `tematica-letteraria:v1` (parallela) |
+| Confronto | `confronto:v1` (coppia, intro, comuni, differenze + tecnica/contesto/critica) | `confronto-filosofico:v1` (+metodo/sintesi) | `confronto-letterario:v1` (+metodo/sintesi) |
+
+Convenzioni immagini: `hero`/`copertina`/`ritratto` per cover e tavole,
+`<chiave>-a/b` per i lati dei pair (`lato-a/b` negli snapshot arte).
