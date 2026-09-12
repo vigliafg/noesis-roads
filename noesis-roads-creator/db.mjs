@@ -304,6 +304,26 @@ export function initSchema() {
   if (!lcols.includes('verbosita')) db.exec("ALTER TABLE schede_lezione ADD COLUMN verbosita TEXT NOT NULL DEFAULT 'standard'");
   if (!lcols.includes('istruzione')) db.exec("ALTER TABLE schede_lezione ADD COLUMN istruzione TEXT NOT NULL DEFAULT 'secondaria'");
 
+  // migrazione: rimozione versioning modelli — id stabile "materia:chiave", una sola riga per chiave.
+  // Tiene la versione più alta, sposta le schede sul sopravvissuto, elimina le altre righe.
+  // Robusta alle collisioni (id pulito già esistente) e rieseguibile senza effetti.
+  var migGroups = getDb().prepare('SELECT materia_id, chiave FROM modelli_scheda GROUP BY materia_id, chiave').all();
+  for (const g of migGroups) {
+    const rows = getDb().prepare('SELECT id, versione FROM modelli_scheda WHERE materia_id = ? AND chiave = ? ORDER BY versione DESC').all(g.materia_id, g.chiave);
+    if (!rows.length) continue;
+    const newId = `${g.materia_id}:${g.chiave}`;
+    let keep = rows.find((r) => r.id === newId) || rows[0];
+    if (!keep) continue;
+    for (const r of rows) {
+      if (r.id === keep.id) continue;
+      getDb().prepare('UPDATE schede_lezione SET modello_id = ? WHERE modello_id = ?').run(newId, r.id);
+      getDb().prepare('DELETE FROM modelli_scheda WHERE id = ?').run(r.id);
+    }
+    getDb().prepare('UPDATE schede_lezione SET modello_id = ? WHERE modello_id = ?').run(newId, keep.id);
+    if (keep.id !== newId) {
+      getDb().prepare('UPDATE modelli_scheda SET id = ? WHERE id = ?').run(newId, keep.id);
+    }
+  }
   // backfill: opere esistenti (solo file su disco) -> carica il BLOB una tantum
   const missing = getDb().prepare("SELECT id, image_path FROM artworks WHERE image_data IS NULL AND image_path != ''").all();
   for (const row of missing) {
@@ -901,22 +921,21 @@ export function listMaterie(conn) {
   return (conn || getDb()).prepare('SELECT * FROM materie ORDER BY id').all().map(rowToMateria);
 }
 
-export function modelloIdStabile(materiaId, chiave, versione) {
-  return `${materiaId}:${chiave}:v${versione}`;
+export function modelloIdStabile(materiaId, chiave) {
+  // Niente più versioning: un solo modello per chiave, id stabile "materia:chiave".
+  return `${materiaId}:${chiave}`;
 }
-export function upsertModello({ materiaId, chiave, nome, versione = 1, schema }) {
+export function upsertModello({ materiaId, chiave, nome, schema }) {
   if (!String(materiaId || '').trim()) throw new Error('modello.materiaId obbligatorio');
   if (!String(chiave || '').trim()) throw new Error('modello.chiave obbligatorio');
   if (!getMateria(materiaId)) throw new Error(`materia sconosciuta: ${materiaId}`);
-  const id = modelloIdStabile(materiaId, chiave, versione);
-  // Come per systemPrompt: il seed a ogni avvio non deve mai sovrascrivere lo
-  // schema di un modello con schede (congelato). Solo il nome si aggiorna.
-  if (modelHasCards(id)) {
-    getDb().prepare('UPDATE modelli_scheda SET nome = ? WHERE id = ?').run(nome || '', id);
-    return getModello(id);
-  }
+  const id = modelloIdStabile(materiaId, chiave);
+  const versione = Number((schema && schema.version) || 1);
+  // Upsert pieno e diretto: niente freeze, niente fork. Le modifiche si applicano
+  // subito anche con schede esistenti (conservano i corpi salvati; le sezioni
+  // rimosse semplicemente non si renderizzano più).
   getDb().prepare(`INSERT INTO modelli_scheda (id, materia_id, chiave, nome, versione, schema_json) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, schema_json=excluded.schema_json`)
+    ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, versione=excluded.versione, schema_json=excluded.schema_json`)
     .run(id, materiaId, chiave, nome || '', versione, JSON.stringify(schema || {}));
   return getModello(id);
 }
@@ -939,17 +958,26 @@ export function modelHasCards(modelloId, conn) {
   return (row?.c || 0) > 0;
 }
 export function listModelli(materiaId, conn) {
-  if (materiaId) return (conn || getDb()).prepare('SELECT * FROM modelli_scheda WHERE materia_id = ? ORDER BY chiave, versione').all(materiaId).map(rowToModello);
-  return (conn || getDb()).prepare('SELECT * FROM modelli_scheda ORDER BY materia_id, chiave, versione').all().map(rowToModello);
+  if (materiaId) return (conn || getDb()).prepare('SELECT * FROM modelli_scheda WHERE materia_id = ? ORDER BY chiave').all(materiaId).map(rowToModello);
+  return (conn || getDb()).prepare('SELECT * FROM modelli_scheda ORDER BY materia_id, chiave').all().map(rowToModello);
 }
 
 // Popola il nucleo dal registry dichiarativo (core/models.mjs): idempotente.
 // Accetta { materie: [...], modelli: [...] } per restare iniettabile nei test.
+// Inserisce solo i modelli mancanti (stessa chiave = vince la versione più alta
+// del registry): NON sovrascrive mai le modifiche fatte dall'utente via UI.
 // Il system_prompt si imposta solo alla prima creazione (vedi upsertMateria).
 export function seedCore({ materie = [], modelli = [] } = {}) {
   for (const m of materie) upsertMateria({ id: m.id, nome: m.nome, descrizione: m.descrizione || '', stato: m.stato || 'attiva', systemPrompt: m.systemPrompt || '' });
+  const best = new Map();
   for (const mod of modelli) {
-    upsertModello({ materiaId: mod.subject, chiave: mod.key, nome: mod.name, versione: mod.version || 1, schema: mod });
+    const cur = best.get(mod.subject + ':' + mod.key);
+    if (!cur || (mod.version || 0) > (cur.version || 0)) best.set(mod.subject + ':' + mod.key, mod);
+  }
+  for (const mod of best.values()) {
+    if (!getModello(`${mod.subject}:${mod.key}`)) {
+      upsertModello({ materiaId: mod.subject, chiave: mod.key, nome: mod.name, schema: mod });
+    }
   }
   return { materie: listMaterie().length, modelli: listModelli().length };
 }

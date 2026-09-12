@@ -28,7 +28,7 @@ function SchedaCard({ card, onOpen }) {
           <div className="subject-card-inner">
             <span className="subject-ico">{String(card.title || 'S').charAt(0)}</span>
             <strong>{card.title}</strong>
-            <small>{card.subtitle || 'Scheda didattica'}</small>
+            <small>{card.subtitle || 'Lezione'}</small>
           </div>
         )}
         <span className="card-arrow"><Icon name="arrow" size={18} /></span>
@@ -36,7 +36,7 @@ function SchedaCard({ card, onOpen }) {
       <div className="card-copy">
         <div className="eyebrow">{card.period}</div>
         <h3>{card.title}</h3>
-        <p>{card.subtitle || 'Scheda didattica'}</p>
+        <p>{card.subtitle || 'Lezione'}</p>
       </div>
     </button>
   );
@@ -68,7 +68,7 @@ function TypeSectionHead({ title, count }) {
     <div className="type-section-head">
       <div>
         <h3 className="type-title">{title}</h3>
-        <p className="type-desc">{count === 1 ? 'Una scheda nel catalogo' : count + ' schede nel catalogo'}</p>
+        <p className="type-desc">{count === 1 ? 'Una lezione nel catalogo' : count + ' lezioni nel catalogo'}</p>
       </div>
       <span className="type-tag">{count}</span>
     </div>
@@ -120,7 +120,7 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
       render: function (card) { return <ComparisonCard key={card.id} card={card} onOpen={onOpen} />; }
     },
     {
-      key: 'scheda', title: 'Le schede', filterKey: 'Schede',
+      key: 'scheda', title: 'Le lezioni', filterKey: 'Lezioni',
       items: (cards || []).filter(function (card) {
         return card.cardType === 'scheda' && (materia === 'tutte' || card.materiaId === materia);
       }),
@@ -129,7 +129,7 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
   ];
 
   // Il filtro per tipo mostra/nasconde intere sezioni; la ricerca filtra dentro ciascuna.
-  // La sezione Schede resta visibile quando il filtro materia la svuota (per poterlo resettare).
+  // La sezione Lezioni resta visibile quando il filtro materia la svuota (per poterlo resettare).
   const schedaTotal = (cards || []).filter(function (card) { return card.cardType === 'scheda'; }).length;
   const visible = sections
     .filter(function (section) { return type === 'Tutte' || type === section.filterKey; })
@@ -147,9 +147,9 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
     <main className="catalog-page">
       <section className="hero-section">
         <div className="hero-copy">
-          <div className="hero-kicker"><span></span> Schede didattiche per ogni materia</div>
+          <div className="hero-kicker"><span></span> Lezioni per ogni materia</div>
           <h1>Ogni argomento<br /><em>racconta</em> una storia.</h1>
-          <p>Esplora autori, opere, temi e confronti di ogni materia. Apri una scheda, leggi, fai domande.</p>
+          <p>Esplora autori, opere, temi e confronti di ogni materia. Apri una lezione, leggi, fai domande.</p>
           <div className="hero-actions"><a href="#catalogo" className="primary-button">Inizia a esplorare <Icon name="arrow" size={18} /></a><span className="hero-note"><Icon name="sparkle" size={15} /> Guidato dall’intelligenza artificiale</span></div>
         </div>
         {hero ? (
@@ -162,7 +162,7 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
       </section>
 
       <section className="catalog-section" id="catalogo">
-        <div className="section-heading"><div><span className="eyebrow">Il catalogo</span><h2>Inizia da una scheda.</h2></div><p>Schede didattiche per materia: autori, opere, temi e confronti.</p></div>
+        <div className="section-heading"><div><span className="eyebrow">Il catalogo</span><h2>Inizia da una lezione.</h2></div><p>Lezioni per materia: autori, opere, temi e confronti.</p></div>
         <div className="catalog-tools"><label className="search-field"><Icon name="search" size={18} /><span className="sr-only">Cerca nell’elenco</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cerca titolo, autore o argomento…" /></label></div>
         <div className="catalog-tabs" role="tablist" aria-label="Filtra la collezione per tipo">
           {[
@@ -170,7 +170,7 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
             ['Dipinti', sections[0].items.length],
             ['Soggetti', sections[1].items.length],
             ['Confronti', sections[2].items.length],
-            ['Schede', sections[3].items.length]
+            ['Lezioni', sections[3].items.length]
           ].filter(function (tab) { return tab[0] === 'Tutte' || tab[1] > 0; }).map(function (tab) {
             return (
               <button key={tab[0]} type="button" role="tab" aria-selected={type === tab[0]} className={'catalog-tab' + (type === tab[0] ? ' active' : '')} onClick={() => setType(tab[0])}>
@@ -184,7 +184,7 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
             <div className="type-section" key={section.key}>
               <TypeSectionHead title={section.title} count={section.items.length} />
               {section.key === 'scheda' && materiaTabs.length > 1 && (
-                <div className="catalog-tabs" role="tablist" aria-label="Filtra le schede per materia" style={{ marginBottom: 12 }}>
+                <div className="catalog-tabs" role="tablist" aria-label="Filtra le lezioni per materia" style={{ marginBottom: 12 }}>
                   {materiaTabs.map(function (tab) {
                     return (
                       <button key={tab[0]} type="button" role="tab" aria-selected={materia === tab[0]} className={'catalog-tab' + (materia === tab[0] ? ' active' : '')} onClick={() => setMateria(tab[0])}>
@@ -196,13 +196,13 @@ function CatalogPage({ cards, onOpen, initialMateria }) {
               )}
               <div className="catalog-grid">{section.items.map(section.render)}</div>
               {section.key === 'scheda' && section.items.length === 0 && (
-                <p style={{ color: 'var(--muted)', fontSize: 12 }}>Nessuna scheda per questa materia — creala da noesis-roads-creator.</p>
+                <p style={{ color: 'var(--muted)', fontSize: 12 }}>Nessuna lezione per questa materia — creala da noesis-roads-creator.</p>
               )}
             </div>
           );
         })}
-        {total === 0 && (cards || []).length === 0 && <div className="catalog-empty"><Icon name="search" size={24} /><h3>Nessun contenuto pubblicato</h3><p>Crea e approva schede da noesis-roads-creator per vederle qui.</p></div>}
-        {total === 0 && (cards || []).length > 0 && <div className="catalog-empty"><Icon name="search" size={24} /><h3>Nessuna scheda trovata</h3><p>Prova a cambiare la ricerca o il filtro.</p></div>}
+        {total === 0 && (cards || []).length === 0 && <div className="catalog-empty"><Icon name="search" size={24} /><h3>Nessun contenuto pubblicato</h3><p>Crea e approva lezioni da noesis-roads-creator per vederle qui.</p></div>}
+        {total === 0 && (cards || []).length > 0 && <div className="catalog-empty"><Icon name="search" size={24} /><h3>Nessuna lezione trovata</h3><p>Prova a cambiare la ricerca o il filtro.</p></div>}
       </section>
     </main>
   );

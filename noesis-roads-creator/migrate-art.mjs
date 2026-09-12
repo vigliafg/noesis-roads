@@ -55,19 +55,20 @@ export function migrateArtwork(legacyId, opts = {}) {
   const full = core.getFullArtwork(legacyId);
   if (!full || full.status !== 'ready') return null;
   const schedaId = `art:opera:${legacyId}`;
-  ensureScheda(core, schedaId, 'arte:opera:v1', full.title || legacyId, dryRun);
+  ensureScheda(core, schedaId, 'arte:opera', full.title || legacyId, dryRun);
   const put = (chiave, corpo) => { if (!dryRun) core.saveSezione(schedaId, chiave, corpo); };
   let images = 0;
 
-  put('presentazione', { text: full.overview?.painting || '' });
-  put('artista', { text: full.overview?.artist || '' });
+  put('argomento', { text: full.overview?.painting || '' });
+  put('autore', { text: full.overview?.artist || '' });
+  put('genesi', { text: JOIN([full.date, full.period, full.institution]) });
   put('tavola', { caption: [full.title, full.artist].filter(Boolean).join(' — ') });
   if (!dryRun) {
     const imgs = core.getArtworkImageData(legacyId);
     images += putImage(core, schedaId, 'hero', imgs?.clean);
     images += putImage(core, schedaId, 'annotata', imgs?.annotated);
   }
-  put('dettagli', {
+  put('struttura', {
     items: (full.details || []).map((d) => {
       const studio = d.tabs?.studio?.content || {};
       const appr = d.tabs?.approfondimento?.content || {};
@@ -85,21 +86,16 @@ export function migrateArtwork(legacyId, opts = {}) {
   const tecniche = (full.details || [])
     .map((d) => d.tabs?.approfondimento?.content?.technique || '')
     .filter(Boolean);
-  put('tecnica', { text: tecniche.join('\n\n') });
-  put('simili', {
-    works: (full.similarWorks || []).map((w) => ({
-      title: w.title || '', artist: w.artist || '', date: w.date || '',
-      museum: w.museum || '', caption: w.caption || '',
-    })),
-  });
+  put('stile', { text: tecniche.join('\n\n') });
+  put('questioni', { text: JOIN([(full.details || []).map((d) => d.tabs?.approfondimento?.content?.openQuestions || '').filter(Boolean).join('\n\n'),
+    (full.similarWorks || []).map((w) => `Confronto: ${[w.title, w.artist, w.date].filter(Boolean).join(', ')} — ${[w.museum, w.caption].filter(Boolean).join(' · ')}`).join('\n\n'),
+    (full.sources || []).map((s) => `Fonte: ${[s.title, s.url].filter(Boolean).join(' — ')}`).join('\n\n')]) });
   if (!dryRun) {
     for (const w of (full.similarWorks || [])) {
       if (!w.hasImage) continue;
       images += putImage(core, schedaId, `sim-${w.id}`, core.getSimilarImage(legacyId, w.id));
     }
   }
-  put('fonti', { entries: (full.sources || []).map((s) => ({ label: s.title || s.url, value: s.url || '' })) });
-
   const gate = finish(core, schedaId, dryRun, warnings);
   return { schedaId, images, missing: gate.missing };
 }
@@ -110,7 +106,7 @@ export function migrateSubject(legacyId, opts = {}) {
   const full = core.getFullSubject(legacyId);
   if (!full || full.status !== 'ready') return null;
   const schedaId = `art:soggetto:${legacyId}`;
-  ensureScheda(core, schedaId, 'arte:soggetto:v1', full.name || legacyId, dryRun);
+  ensureScheda(core, schedaId, 'arte:soggetto', full.name || legacyId, dryRun);
   const put = (chiave, corpo) => { if (!dryRun) core.saveSezione(schedaId, chiave, corpo); };
   let images = 0;
 
@@ -149,7 +145,7 @@ export function migrateComparison(legacyId, opts = {}) {
   const full = core.getFullComparison(legacyId);
   if (!full || full.status !== 'ready') return null;
   const schedaId = `art:confronto:${legacyId}`;
-  ensureScheda(core, schedaId, 'arte:confronto:v1', full.title || legacyId, dryRun);
+  ensureScheda(core, schedaId, 'arte:confronto', full.title || legacyId, dryRun);
   const put = (chiave, corpo) => { if (!dryRun) core.saveSezione(schedaId, chiave, corpo); };
   let images = 0;
 

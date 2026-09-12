@@ -1,9 +1,11 @@
 # Noesis Roads — Specifica dei modelli di scheda (MODEL_SPEC)
 
-Un *modello di scheda* è un documento JSON versionato che dichiara le sezioni
+Un *modello di scheda* è un documento JSON che dichiara le sezioni
 di un tipo di scheda-lezione per una materia. Stesso formato per i modelli
 fissi iniziali e per quelli creati dall'utente (wizard "+ Nuova materia",
-API `/api/models`, versioni con fork: mai UPDATE con schede esistenti).
+API `/api/models`). Un solo modello per chiave (`materia:chiave`, niente
+versioning): le modifiche si applicano subito, le schede esistenti conservano
+i contenuti salvati.
 
 ## Formato
 
@@ -33,8 +35,9 @@ API `/api/models`, versioni con fork: mai UPDATE con schede esistenti).
 
 ## Regole
 
-- `key` univoca per materia; `version` incrementale (mai modificare uno schema
-  con schede già `ready`: si crea una nuova versione).
+- `key` univoca per materia (id stabile `materia:chiave`); le modifiche allo
+  schema sono dirette e immediate, anche con schede esistenti (conservano i
+  corpi salvati; le sezioni rimosse non si renderizzano più).
 - `type` ∈ `text | epochs | works | points | kv | pair | image` (vedi
   `ARCHITECTURE.md`); ogni tipo definisce forma di `corpo_json`, widget
   editor, blocco viewer e blocco PDF.

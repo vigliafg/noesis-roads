@@ -123,9 +123,9 @@ test('snapshot arte→nucleo: conteggi, id stabili, idempotenza, legacy intatte'
     // Dettaglio fedeltà: testi e ruoli immagini
     const opera = db.getSchedaFull('art:opera:w1');
     const byKey = new Map(opera.sezioni.map((s) => [s.chiave, s.corpo]));
-    assert.ok(byKey.get('presentazione').text.includes('luminoso'));
-    assert.equal(byKey.get('dettagli').items[0].title, 'L’angelo');
-    assert.ok(byKey.get('dettagli').items[0].text.includes('Gabriele'));
+    assert.ok(byKey.get('argomento').text.includes('luminoso'));
+    assert.equal(byKey.get('struttura').items[0].title, 'L’angelo');
+    assert.ok(byKey.get('struttura').items[0].text.includes('Gabriele'));
     assert.deepEqual(opera.immagini.map((m) => m.ruolo).sort(), ['annotata', 'hero', 'sim-1']);
     const sogg = db.getSchedaFull('art:soggetto:annunciazione');
     assert.equal(new Map(sogg.sezioni.map((s) => [s.chiave, s.corpo])).get('evoluzione').chapters.length, 2);

@@ -112,7 +112,7 @@ export function validateConfig(patch) {
 
 function sendJson(res, status, payload) {
   const data = Buffer.from(JSON.stringify(payload));
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': data.length, 'Cache-Control': 'no-store' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': data.length, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
   res.end(data);
 }
 
@@ -329,7 +329,7 @@ export function createHubServer(opts = {}) {
   const scripts = opts.scripts || {};
   const children = {
     viewer: { name: 'viewer', script: scripts.viewer || join(ROOT, 'server.mjs'), extraEnv: { APP_PORT: String(viewerPort) }, proc: null, up: false, expectExit: false, restartTimer: null },
-    creator: { name: 'creator', script: scripts.creator || join(ROOT, 'noesis-roads-creator', 'server.mjs'), extraEnv: { NOESIS_CREATOR_PORT: String(creatorPort) }, proc: null, up: false, expectExit: false, restartTimer: null }
+    creator: { name: 'creator', script: scripts.creator || join(ROOT, 'noesis-roads-creator', 'server.mjs'), extraEnv: { NOESIS_CREATOR_PORT: String(creatorPort), NOESIS_VIEWER_PORT: String(viewerPort) }, proc: null, up: false, expectExit: false, restartTimer: null }
   };
   let stopping = false;
 

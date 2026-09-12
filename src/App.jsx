@@ -16,6 +16,7 @@ function App() {
   const [libraryStatus, setLibraryStatus] = React.useState('loading');
   const [openingId, setOpeningId] = React.useState(null);
   const [openError, setOpenError] = React.useState(null);
+  const openCardRef = React.useRef(null);
 
   // La collezione arriva dal DB di noesis-roads-creator: schede-lezione
   // generiche pubblicate (stato "ready"), di qualunque materia. I tipi storici
@@ -31,6 +32,12 @@ function App() {
         // Niente demo arte di ripiego: a catalogo vuoto si mostra uno stato vuoto neutro.
         setCards(published);
         setLibraryStatus('ready');
+        // Deep-link ?open=<id>: apre direttamente la lezione (es. dal creator).
+        const openId = new URLSearchParams(location.search).get('open');
+        if (openId) {
+          const found = published.find(function (c) { return c.id === openId; });
+          if (found) openCardRef.current(found);
+        }
       })
       .catch(() => {
         if (cancelled) return;
@@ -93,6 +100,7 @@ function App() {
       .then((payload) => { setOpeningId(null); setActiveArtwork(payload); })
       .catch((error) => { setOpeningId(null); setOpenError((error && error.message) || 'Impossibile caricare la scheda.'); });
   }
+  openCardRef.current = openCard;
 
   function backHome() {
     setActiveCard(null);
@@ -116,7 +124,7 @@ function App() {
         <main className="explore-page"><section className="exploration-layout" style={{ paddingTop: 60 }}>
           <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '70px 20px' }}>
             <div className="loading-orbit" style={{ margin: '0 auto 22px' }}><span></span><span></span><span></span></div>
-            <h2 style={{ fontFamily: 'Playfair Display, Georgia, serif' }}>Carico la scheda didattica…</h2>
+            <h2 style={{ fontFamily: 'Playfair Display, Georgia, serif' }}>Carico la lezione…</h2>
           </div>
         </section></main>
       )}
@@ -134,7 +142,7 @@ function App() {
       {activeSubject && <SubjectView subject={activeSubject} onBack={backHome} />}
       {activeComparison && <ComparisonView comparison={activeComparison} onBack={backHome} />}
       {activeScheda && <GenericCardView card={activeScheda} onBack={backHome} />}
-      {showCatalog && <footer className="site-footer" id="metodo"><div className="footer-brand"><span className="brand-mark"><i></i><i></i><i></i></span><span>Noesis <strong>Roads</strong></span></div><p>Un invito a esplorare ogni materia con più attenzione.</p><div className="footer-meta"><span>Progetto educativo · 2026</span><span>Schede didattiche per ogni materia</span></div></footer>}
+      {showCatalog && <footer className="site-footer" id="metodo"><div className="footer-brand"><span className="brand-mark"><i></i><i></i><i></i></span><span>Noesis <strong>Roads</strong></span></div><p>Un invito a esplorare ogni materia con più attenzione.</p><div className="footer-meta"><span>Progetto educativo · 2026</span><span>Lezioni per ogni materia</span></div></footer>}
     </div>
   );
 }

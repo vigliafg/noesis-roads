@@ -123,6 +123,7 @@ function philosophyModels() {
       key: 'autore-pensiero', subject: 'filosofia', name: "L'autore e il suo pensiero", version: 1,
       cover: { eyebrow: 'Scheda didattica · filosofia', heroRole: 'ritratto' },
       nascondiCreazione: true, // legacy: schede esistenti (Kant) intatte, non proposto per nuove
+      legacy: true, // doppione di 'autore': MAI seminato nei DB utente (fixture per test + sorgente template)
       sections: [
         { key: 'vita', title: 'Vita e contesto', type: 'text', required: true, maxWords: 180, prompt: 'Date, luoghi, formazione, contesto storico. 120-180 parole.' },
         { key: 'nuclei', title: 'I nuclei del pensiero', type: 'points', required: true, prompt: 'Nuclei del pensiero: 3-5 voci, una tesi per voce, 40-70 parole, solo dottrine attestate.' },
@@ -171,7 +172,7 @@ function philosophyModels() {
       ],
     },
     {
-      key: 'confronto-filosofico', subject: 'filosofia', name: 'Il confronto tra due autori', version: 1,
+      key: 'confronto-filosofico', subject: 'filosofia', name: 'Il confronto fra due filosofi', version: 1,
       cover: { eyebrow: 'Scheda didattica · filosofia', heroRole: 'ritratto' },
       sections: [
         { key: 'coppia', title: 'I due autori', type: 'pair', required: true, prompt: 'I due autori a confronto: per lato nome, date, scuola e una riga sul perché accostati (ritratti).' },
@@ -260,12 +261,12 @@ export function getModello(materiaId, chiave) {
 }
 
 export function getModelloById(modelloId) {
-  // id stabile "materia:chiave:v<versione>" oppure "materia:chiave"
+  // id stabile "materia:chiave" (il versioning dei modelli è stato rimosso: una sola riga per chiave)
   const [subject, key] = String(modelloId || '').split(':');
   if (!subject || !key) return null;
   return getModello(subject, key);
 }
 
 export function modelloIdOf(model) {
-  return `${model.subject}:${model.key}:v${model.version}`;
+  return `${model.subject}:${model.key}`;
 }

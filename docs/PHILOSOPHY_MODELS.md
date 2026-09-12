@@ -24,7 +24,7 @@ Specchio del modello "soggetto": introduzione (`text`), origini della questione
 ciascuno), testi/autori rappresentativi (`works` + galleria), interpretazioni
 (`text`), curiosità e questioni (`text`).
 
-## 3. `confronto-filosofico` — Il confronto tra due autori
+## 3. `confronto-filosofico` — Il confronto fra due filosofi
 
 Specchio del "faccia a faccia": coppia A/B (`pair`, ritratti), introduzione
 (`text` 120–180 parole), punti in comune (`points` 3–5), differenze (`points`

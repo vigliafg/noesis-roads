@@ -16,7 +16,7 @@ function GenericCardView({ card, onBack }) {
   const coverStyle = heroRole === 'ritratto'
     ? { maxWidth: 340, margin: '0 auto 8px' }
     : heroRole === 'thumb' ? { maxWidth: 520, margin: '0 auto 8px' } : { maxWidth: 860, margin: '0 auto 8px' };
-  const eyebrow = (schema.cover && schema.cover.eyebrow) || 'Scheda didattica';
+  const eyebrow = (schema.cover && schema.cover.eyebrow) || 'Lezione';
   const subtitle = [schema.subject, schema.name].filter(Boolean).join(' · ');
   const lvlLabel = function (v, i) {
     const vv = { essenziale: 'Essenziale', standard: 'Standard', approfondita: 'Approfondita' }[v] || v;
@@ -37,7 +37,7 @@ function GenericCardView({ card, onBack }) {
         </div>
         <div className="explore-progress"><span>02</span><i></i><span>{subtitle}</span></div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <a className="back-button" href={'/api/cards/' + encodeURIComponent(card.id) + '/pdf'} title="Scarica la scheda in PDF">⬇ PDF</a>
+          <a className="back-button" href={'/api/cards/' + encodeURIComponent(card.id) + '/pdf'} title="Scarica la lezione in PDF">⬇ PDF</a>
           <button className="back-button" onClick={onBack}><span className="back-icon">←</span> Torna al catalogo</button>
         </div>
       </header>
@@ -48,7 +48,7 @@ function GenericCardView({ card, onBack }) {
           <p>{subtitle}</p>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
-          <div className="explore-tag"><Icon name="sparkle" size={15} /> Scheda didattica dal database</div>
+          <div className="explore-tag"><Icon name="sparkle" size={15} /> Lezione dal database</div>
           {(card.verbosita || card.istruzione) && (
             <div className="explore-tag" title="Livelli scelti in testata alla creazione">Livelli: {lvlLabel(card.verbosita, card.istruzione)}</div>
           )}
@@ -81,7 +81,7 @@ function GenericCardView({ card, onBack }) {
           </section>
         );
       })}
-      <p className="overview-disclaimer">Scheda didattica generata con intelligenza artificiale (noesis-roads-creator) e verificata in fase di pubblicazione.</p>
+      <p className="overview-disclaimer">Lezione generata con intelligenza artificiale (noesis-roads-creator) e verificata in fase di pubblicazione.</p>
     </main>
   );
 }

@@ -42,7 +42,8 @@ const PUBLIC_DIR = join(APP_ROOT, 'public');
 initSchema();
 // Nucleo generico: seed idempotente dal registry dichiarativo (core/models.mjs).
 // Le tabelle legacy restano intatte; materie e modelli vengono (ri)allineati a ogni avvio.
-seedCore({ materie: materieRegistry(), modelli: materieRegistry().flatMap((m) => modelliRegistry(m.id)) });
+// I modelli marcati legacy (doppioni storici) non entrano mai nei DB utente.
+seedCore({ materie: materieRegistry(), modelli: materieRegistry().flatMap((m) => modelliRegistry(m.id)).filter((m) => !m.legacy) });
 
 // ---------- helpers ----------
 function json(res, status, payload) {
@@ -943,29 +944,17 @@ function handleApi(req, res, urlPath) {
     return errs;
   }
 
-  // GET /api/models?subject=filosofia[&standard=1] — modelli di una materia.
-  // standard=1: solo l'ultima versione valida per chiave (i 4 modelli standard
-  // per la creazione; bozze e vecchie versioni escluse).
+  // GET /api/models?subject=filosofia — modelli di una materia (niente versioning:
+  // un solo modello per chiave; il filtro nascondiCreazione resta a carico del client).
   if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'models') {
     const q = new URL(req.url, 'http://localhost').searchParams;
     const subject = q.get('subject') || '';
     if (!subject) return err(res, 400, 'Parametro subject obbligatorio (es. ?subject=filosofia)');
-    let models = listModelli(subject);
-    if (q.get('standard') === '1') {
-      const latest = new Map();
-      for (const m of models) {
-        const cur = latest.get(m.chiave);
-        if (!cur || m.versione > cur.versione) latest.set(m.chiave, m);
-      }
-      models = [...latest.values()].filter((m) => validateModel({
-        ...m.schema, key: m.chiave, subject: m.materiaId, name: m.nome, version: m.versione,
-      }).length === 0 && m.schema.nascondiCreazione !== true);
-    }
-    return json(res, 200, { models });
+    return json(res, 200, { models: listModelli(subject) });
   }
 
-  // POST /api/models { materiaId, chiave?, nome, fromTemplate? } — nuovo modello v1 (wizard).
-  // fromTemplate: id modello ("materie:chiave:vN") da clonare. Sezioni: [] (draft) o ereditate.
+  // POST /api/models { materiaId, chiave?, nome, fromTemplate? } — nuovo modello (wizard).
+  // fromTemplate: id modello ("materia:chiave") da clonare. Sezioni: [] (draft) o ereditate.
   if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'models') {
     return readBody(req).then((input) => {
       try {
@@ -998,8 +987,8 @@ function handleApi(req, res, urlPath) {
         }
         const defErrs = checkSectionDefs(schema.sections);
         if (defErrs.length) return err(res, 400, 'Sezioni non valide: ' + defErrs.join('; '));
-        if (getModello(`${materiaId}:${chiave}:v1`)) return err(res, 409, 'Esiste già il modello ' + materiaId + ':' + chiave + ':v1');
-        const created = upsertModello({ materiaId, chiave, nome, versione: 1, schema });
+        if (getModello(`${materiaId}:${chiave}`)) return err(res, 409, 'Esiste già il modello ' + materiaId + ':' + chiave);
+        const created = upsertModello({ materiaId, chiave, nome, schema });
         return json(res, 201, { model: created });
       } catch (e) {
         return err(res, String(e.message || '').includes('UNIQUE') ? 409 : 400, e.message);
@@ -1007,7 +996,7 @@ function handleApi(req, res, urlPath) {
     }).catch(e => err(res, 400, e.message));
   }
 
-  // PATCH /api/models/:id { nome?, systemPrompt? } — ridenominazione/voce (lo schema via sections/fork)
+  // PATCH /api/models/:id { nome?, systemPrompt? } — ridenominazione/voce (lo schema via sections, diretto)
   if (method === 'PATCH' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'models') {
     return readBody(req).then((input) => {
       const current = getModello(parts[2]);
@@ -1028,27 +1017,16 @@ function handleApi(req, res, urlPath) {
   // DELETE /api/models/:id — rifiutato se ha schede
   if (method === 'DELETE' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'models') {
     if (!getModello(parts[2])) return err(res, 404, 'Modello non trovato');
-    if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: crea una nuova versione con fork');
+    if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: eliminale prima di eliminare il modello');
     deleteModello(parts[2]);
     return json(res, 200, { ok: true });
   }
 
-  // POST /api/models/:id/fork — clona in vN+1 (unica strada con schede esistenti)
-  if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'models' && parts[3] === 'fork') {
-    const current = getModello(parts[2]);
-    if (!current) return err(res, 404, 'Modello non trovato');
-    const schema = JSON.parse(JSON.stringify(current.schema));
-    schema.version = current.versione + 1;
-    const created = upsertModello({ materiaId: current.materiaId, chiave: current.chiave, nome: current.nome, versione: schema.version, schema });
-    return json(res, 201, { model: created });
-  }
-
-  // POST /api/models/:id/sections { key?, title, type, required?, prompt?, system?, maxWords? }
+  // POST /api/models/:id/sections { key?, title, type, required?, prompt?, system?, maxWords? } — diretto, anche con schede
   if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'models' && parts[3] === 'sections') {
     return readBody(req).then((input) => {
       const current = getModello(parts[2]);
       if (!current) return err(res, 404, 'Modello non trovato');
-      if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: crea una nuova versione con fork');
       const schema = JSON.parse(JSON.stringify(current.schema));
       schema.sections = Array.isArray(schema.sections) ? schema.sections : [];
       const def = {
@@ -1071,12 +1049,11 @@ function handleApi(req, res, urlPath) {
     }).catch(e => err(res, 400, e.message));
   }
 
-  // PATCH /api/models/:id/sections/:sez — modifica definizione (409 con schede)
+  // PATCH /api/models/:id/sections/:sez — modifica definizione (diretta, anche con schede)
   if (method === 'PATCH' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'models' && parts[3] === 'sections') {
     return readBody(req).then((input) => {
       const current = getModello(parts[2]);
       if (!current) return err(res, 404, 'Modello non trovato');
-      if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: crea una nuova versione con fork');
       const schema = JSON.parse(JSON.stringify(current.schema));
       schema.sections = Array.isArray(schema.sections) ? schema.sections : [];
       const idx = schema.sections.findIndex((s) => s.key === parts[4]);
@@ -1100,17 +1077,81 @@ function handleApi(req, res, urlPath) {
     }).catch(e => err(res, 400, e.message));
   }
 
-  // DELETE /api/models/:id/sections/:sez (409 con schede)
+  // DELETE /api/models/:id/sections/:sez (diretta, anche con schede)
   if (method === 'DELETE' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'models' && parts[3] === 'sections') {
     const current = getModello(parts[2]);
     if (!current) return err(res, 404, 'Modello non trovato');
-    if (modelHasCards(parts[2])) return err(res, 409, 'Il modello ha schede: crea una nuova versione con fork');
     const schema = JSON.parse(JSON.stringify(current.schema));
     schema.sections = (Array.isArray(schema.sections) ? schema.sections : []).filter((s) => s.key !== parts[4]);
     const saved = updateModello(parts[2], { schema });
     return json(res, 200, { ok: true, model: saved });
   }
 
+  // POST /api/models/suggest-archetypes — quali archetipi hanno senso per una materia.
+  // Input: { materia: {nome, descrizione?} }. Output: { suggested: ['opera',...], note }.
+  // suggested contiene sottoinsieme di ['autore','opera','confronto','tema']. Fallback 503 -> tutti.
+  if (method === 'POST' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'models' && parts[2] === 'suggest-archetypes') {
+    return readBody(req).then(async (input) => {
+      const apiKey = getOpenRouterApiKey();
+      if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
+      const matNome = String((input.materia && input.materia.nome) || '').trim();
+      if (!matNome) return err(res, 400, 'materia.nome obbligatorio');
+      const system = 'Rispondi con un solo oggetto JSON, senza altro testo prima o dopo.';
+      // Prompt compatto in forma piana: intestazioni tipo "Descrizione:" o JSON verboso
+      // provocano risposte vuote/tronche dal modello. Forma verificata: "Materia: X, desc...".
+      const desc = String((input.materia && input.materia.descrizione) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      const user = 'Materia: ' + matNome + (desc ? ', ' + desc.replace(/\.+$/, '') + '. ' : '. ') +
+        'Archetipi ammessi (usa SOLO queste chiavi): autore, opera, confronto, tema. ' +
+        'Quali hanno senso? Escludi solo gli inadatti; nel dubbio includi. ' +
+        'Esempio: {"suggested":["autore","opera"],"note":"..."}.';
+      const valid = ['autore', 'opera', 'confronto', 'tema'];
+      let raw = null, data = null, sug = [];
+      for (let attempt = 0; attempt < 3 && !sug.length; attempt++) {
+        try {
+          raw = await callModel(TEXT_MODEL, [{ type: 'text', text: user }], apiKey, globalThis.fetch, { system, maxTokens: 1500 });
+        } catch (e) {
+          if (attempt < 2) continue;
+          return err(res, 502, 'Suggerimento non riuscito (' + (e.message || e) + ')');
+        }
+        data = raw && raw.data;
+        sug = Array.isArray(data && data.suggested) ? data.suggested.filter((s) => valid.includes(s)) : [];
+      }
+      if (!sug.length) return err(res, 502, 'Suggerimento non riuscito: risposta inutilizzabile');
+      return json(res, 200, { suggested: [...new Set(sug)], note: typeof data.note === 'string' ? data.note.trim() : '' });
+    }).catch((e) => err(res, 500, e.message));
+  }
+
+  // POST /api/models/preflight — controllo qualità di modelli prima della creazione.
+  // Input: { materia: {nome}, models: [{ nome, sections: [{key,title,type,required,prompt?}] }] }.
+  // Output: { warnings: [{ model, text }] } (vuoto = tutto bene). Fallback 503/502 -> client nasconde.
+  if (method === 'POST' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'models' && parts[2] === 'preflight') {
+    return readBody(req).then(async (input) => {
+      const apiKey = getOpenRouterApiKey();
+      if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
+      const matNome = String((input.materia && input.materia.nome) || '').trim();
+      const models = Array.isArray(input.models) ? input.models.filter((m) => m && m.nome) : [];
+      if (!matNome || !models.length) return err(res, 400, 'materia.nome e models[] obbligatori');
+      const system = 'Sei un instructional designer italiano, severo ma concreto. Rispondi SOLO con JSON valido, senza commenti.';
+      const user = JSON.stringify({
+        materia: matNome,
+        richiesta: 'Questi modelli stanno per essere creati. Segnala SOLO problemi veri e concreti (max 5 in tutto): parti mancanti per il tipo di modello, prompt vaghi o fuori materia, nomi confondibili tra loro. Niente complimenti, niente ovvietà.',
+        modelli: models.map((m) => ({
+          nome: m.nome,
+          sezioni: (m.sections || []).map((s) => ({ key: s.key, title: s.title, type: s.type, required: !!s.required, prompt: (s.prompt || '').slice(0, 300) }))
+        })),
+        formatoRisposta: { warnings: [{ model: 'nome modello', text: 'problema in una frase + suggerimento' }] }
+      });
+      let raw;
+      try {
+        raw = await callModel(TEXT_MODEL, [{ type: 'text', text: user }], apiKey, globalThis.fetch, { system, maxTokens: 1500 });
+      } catch (e) { return err(res, 502, 'Controllo non riuscito (' + (e.message || e) + ')'); }
+      const data = raw && raw.data;
+      const warnings = Array.isArray(data && data.warnings)
+        ? data.warnings.filter((w) => w && w.text).map((w) => ({ model: String(w.model || ''), text: String(w.text).slice(0, 400) })).slice(0, 5)
+        : [];
+      return json(res, 200, { warnings });
+    }).catch((e) => err(res, 500, e.message));
+  }
   // POST /api/models/adapt — adatta prompt clonati alla nuova materia via LLM.
   // Due forme: singola { materia, modello: {nome}, sourceMateriaNome?, sections: [...] }
   // o cumulativa { materia, models: [{ nome, sourceMateriaNome?, sections: [...] }] } (1 chiamata per N modelli).
@@ -1760,6 +1801,12 @@ function hubUrlFor(req) {
   const hubPort = Number(process.env.NOESIS_HUB_PORT || process.env.ARTEST_HUB_PORT || 18080);
   return `http://${hostname}:${hubPort}/`;
 }
+function viewerUrlFor(req) {
+  const port = Number(process.env.NOESIS_VIEWER_PORT || process.env.APP_PORT || 18000);
+  const hostHeader = String((req && req.headers && req.headers.host) || '').trim();
+  const hostname = hostHeader.split(':')[0] || '127.0.0.1';
+  return `http://${hostname}:${port}/`;
+}
 
 async function serveStatic(req, res, urlPath) {
   const requestPath = urlPath === '/' ? '/index.html' : urlPath;
@@ -1772,7 +1819,7 @@ async function serveStatic(req, res, urlPath) {
     res.writeHead(200, { 'Content-Type': types[extname(filePath)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     let body = await readFile(filePath);
     if (extname(filePath) === '.html') {
-      const configScript = `<script>window.CREATOR_DATA = Object.assign(window.CREATOR_DATA || {}, { hubUrl: ${JSON.stringify(hubUrlFor(req))} });</script>`;
+      const configScript = `<script>window.CREATOR_DATA = Object.assign(window.CREATOR_DATA || {}, { hubUrl: ${JSON.stringify(hubUrlFor(req))}, viewerUrl: ${JSON.stringify(viewerUrlFor(req))} });</script>`;
       body = Buffer.from(body.toString('utf8').replace('<!--APP_CONFIG-->', configScript));
     }
     res.end(body);

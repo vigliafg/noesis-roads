@@ -21,6 +21,17 @@ test('sectionTypes: i 7 tipi condividono il vocabolario ARCHITECTURE.md', () => 
   assert.deepEqual(emptyBodyFor('pair'), { a: { title: '', text: '' }, b: { title: '', text: '' } });
 });
 
+// Fixture: il modello legacy 'filosofia:autore-pensiero' (doppione rimosso dai DB,
+// resta nel registry) va creato esplicitamente nei test che lo usano via API.
+async function seedAutorePensiero(asJson) {
+  const tpl = getModello('filosofia', 'autore-pensiero');
+  const r = await asJson('POST', '/api/models', {
+    materiaId: 'filosofia', chiave: 'autore-pensiero', nome: tpl.name, sections: tpl.sections,
+  });
+  assert.equal(r.status, 201);
+  return r.body.model;
+}
+
 test('modelSpec: modello valido passa, modello rotto elenca gli errori', () => {
   const mod = getModello('filosofia', 'autore-pensiero');
   assert.equal(validateModel(mod).length, 0);
@@ -67,9 +78,9 @@ test('db nucleo: seed + scheda + gate required + immagini + RO', async () => {
     db.initSchema();
     const seeded = db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia'), ...core.listModelli('letteratura-italiana')] });
     assert.equal(seeded.materie, 3);
-    assert.equal(seeded.modelli, 16);
+    assert.equal(seeded.modelli, 13); // una sola riga per chiave (niente versioni)
     assert.equal(db.listMaterie().length, 3);
-    assert.equal(db.listModelli('filosofia').length, 6);
+    assert.equal(db.listModelli('filosofia').length, 5);
     db.updateMateria('filosofia', { systemPrompt: 'Tono custom.' });
     db.seedCore({ materie: core.listMaterie(), modelli: [] });
     assert.equal(db.getMateria('filosofia').systemPrompt, 'Tono custom.'); // il seed non sovrascrive
@@ -214,11 +225,12 @@ test('API generiche /api/materie /models /cards: CRUD, gate, immagini, PDF', asy
     assert.equal(r.status, 400); // subject obbligatorio
     r = await asJson('GET', '/api/models?subject=filosofia');
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.models.map((m) => m.chiave || m.schema.key), ['autore', 'autore-pensiero', 'confronto-filosofico', 'opera-filosofica', 'opera-filosofica', 'tematica']);
+    assert.deepEqual(r.body.models.map((m) => m.chiave || m.schema.key), ['autore', 'confronto-filosofico', 'opera-filosofica', 'tematica']);
+    await seedAutorePensiero(asJson); // legacy non seminato: fixture per le schede sotto
 
     // Nuova scheda: modello ignoto -> 400; ok -> 201; stesso id -> 409
-    const modelloId = 'filosofia:autore-pensiero:v1';
-    r = await asJson('POST', '/api/cards', { modelloId: 'x:inesistente:v1', titolo: 'No' });
+    const modelloId = 'filosofia:autore-pensiero';
+    r = await asJson('POST', '/api/cards', { modelloId: 'x:inesistente', titolo: 'No' });
     assert.equal(r.status, 400);
     r = await asJson('POST', '/api/cards', { id: 'kant-9', modelloId, titolo: 'Kant' });
     assert.equal(r.status, 201);
@@ -319,7 +331,7 @@ test('Viewer generico: /api/materie /models /cards + immagini (sola lettura)', a
     db.initSchema();
     db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia'), ...core.listModelli('letteratura-italiana')] });
     // Scheda ready che copre tutti i tipi-sezione
-    db.createScheda({ id: 'kant-v', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Kant' });
+    db.createScheda({ id: 'kant-v', modelloId: 'filosofia:autore-pensiero', titolo: 'Kant' });
     db.saveSezione('kant-v', 'vita', { text: 'Vita di Kant.' });
     db.saveSezione('kant-v', 'nuclei', { items: [{ title: 'Critica', text: 'Limiti della ragione.' }] });
     db.saveSezione('kant-v', 'opere', { works: [{ title: 'Critica della ragion pura', artist: 'Kant' }] });
@@ -329,8 +341,8 @@ test('Viewer generico: /api/materie /models /cards + immagini (sola lettura)', a
     assert.equal(db.approveScheda('kant-v').ok, true);
     const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
     const imgId = db.addImmagine('kant-v', 'ritratto', pixel, 'image/png');
-    db.createScheda({ id: 'bozza-v', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Bozza' });
-    db.createScheda({ id: 'sub-v', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere'] });
+    db.createScheda({ id: 'bozza-v', modelloId: 'filosofia:autore-pensiero', titolo: 'Bozza' });
+    db.createScheda({ id: 'sub-v', modelloId: 'filosofia:autore-pensiero', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere'] });
     db.saveSezione('sub-v', 'vita', { text: 'Vita.' });
     db.saveSezione('sub-v', 'nuclei', { items: [{ title: 'T', text: 'x' }] });
     db.saveSezione('sub-v', 'opere', { works: [{ title: 'W', artist: 'A' }] });
@@ -371,7 +383,7 @@ test('Viewer generico: /api/materie /models /cards + immagini (sola lettura)', a
     assert.equal(res.status, 400);
     res = await fetch(base + '/api/models?subject=filosofia');
     assert.equal(res.status, 200);
-    assert.equal((await res.json()).models.length, 6);
+    assert.equal((await res.json()).models.length, 5); // una riga per chiave
 
     res = await fetch(base + '/api/cards/kant-v');
     assert.equal(res.status, 200);
@@ -452,27 +464,28 @@ test('API cards: sezioni epochs/kv/pair e didascalia immagine', async () => {
     }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
 
     // tematica: epochs + works + pair assente -> uso confronto-filosofico per pair, tematica per epochs
-    let r = await asJson('POST', '/api/cards', { id: 'tempo-1', modelloId: 'filosofia:tematica:v1', titolo: 'Il tempo' });
+    let r = await asJson('POST', '/api/cards', { id: 'tempo-1', modelloId: 'filosofia:tematica', titolo: 'Il tempo' });
     assert.equal(r.status, 201);
     r = await asJson('PATCH', '/api/cards/tempo-1/sections/evoluzione', { corpo: { chapters: [{ era: 'Antichità', text: 'Agostino.' }] } });
     assert.equal(r.status, 200);
     r = await asJson('PATCH', '/api/cards/tempo-1/sections/evoluzione', { corpo: { chapters: [{ era: '', text: '' }] } });
     assert.equal(r.status, 400); // voce vuota rifiutata
-    r = await asJson('POST', '/api/cards', { id: 'pb-1', modelloId: 'filosofia:confronto-filosofico:v1', titolo: 'Platone vs Aristotele' });
+    r = await asJson('POST', '/api/cards', { id: 'pb-1', modelloId: 'filosofia:confronto-filosofico', titolo: 'Platone vs Aristotele' });
     assert.equal(r.status, 201);
     r = await asJson('PATCH', '/api/cards/pb-1/sections/coppia', { corpo: { a: { title: 'Platone', text: 'Idee.' }, b: { title: '', text: '' } } });
     assert.equal(r.status, 400); // lato B vuoto rifiutato
     r = await asJson('PATCH', '/api/cards/pb-1/sections/coppia', { corpo: { a: { title: 'Platone', text: 'Idee.' }, b: { title: 'Aristotele', text: 'Sostanza.' } } });
     assert.equal(r.status, 200);
-    // kv del glossario autore-pensiero
-    r = await asJson('POST', '/api/cards', { id: 'kant-g', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Kant' });
+    // kv del glossario autore-pensiero (fixture: legacy non seminato)
+    await seedAutorePensiero(asJson);
+    r = await asJson('POST', '/api/cards', { id: 'kant-g', modelloId: 'filosofia:autore-pensiero', titolo: 'Kant' });
     assert.equal(r.status, 201);
     r = await asJson('PATCH', '/api/cards/kant-g/sections/concetti', { corpo: { entries: [{ label: 'A priori', value: 'Prima.' }] } });
     assert.equal(r.status, 200);
     r = await asJson('PATCH', '/api/cards/kant-g/sections/concetti', { corpo: { entries: [{ label: '', value: '' }] } });
     assert.equal(r.status, 400);
     // arte opera: sezione tavola (image) accetta didascalia via PATCH
-    r = await asJson('POST', '/api/cards', { id: 'op-1', modelloId: 'arte:opera:v1', titolo: 'Annunciazione' });
+    r = await asJson('POST', '/api/cards', { id: 'op-1', modelloId: 'arte:opera', titolo: 'Annunciazione' });
     assert.equal(r.status, 201);
     r = await asJson('PATCH', '/api/cards/op-1/sections/tavola', { corpo: { caption: 'Tavola.' } });
     assert.equal(r.status, 200);
@@ -518,7 +531,7 @@ test('Viewer PDF: libro d\u2019arte per i 4 tipi + gate (sola lettura)', async (
     db.setComparisonSide('cmp-1', 'b', { source: 'external', title: 'B', imageStatus: 'missing' });
     db.updateComparison('cmp-1', { intro: 'Intro confronto.' });
     db.approveComparison('cmp-1');
-    db.createScheda({ id: 'kant-vpdf', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Kant' });
+    db.createScheda({ id: 'kant-vpdf', modelloId: 'filosofia:autore-pensiero', titolo: 'Kant' });
     db.saveSezione('kant-vpdf', 'vita', { text: 'Vita.' });
     db.saveSezione('kant-vpdf', 'nuclei', { items: [{ title: 'T', text: 'x' }] });
     db.saveSezione('kant-vpdf', 'opere', { works: [{ title: 'Critica', artist: 'Kant' }] });
@@ -625,21 +638,22 @@ test('generate sezione: percorso completo con OpenRouter simulato (regressione n
       body: body === undefined ? undefined : JSON.stringify(body),
     }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
 
-    let r = await asJson('POST', '/api/cards', { id: 'gen-1', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Kant' });
+    await seedAutorePensiero(asJson); // fixture: legacy non seminato
+    let r = await asJson('POST', '/api/cards', { id: 'gen-1', modelloId: 'filosofia:autore-pensiero', titolo: 'Kant' });
     assert.equal(r.status, 201);
     r = await asJson('POST', '/api/cards/gen-1/generate/nuclei', {});
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepEqual(r.body.warnings, []);
     assert.equal(r.body.section.corpo.items.length, 2);
     assert.equal(r.body.section.corpo.items[0].title, 'Critica');
-    assert.equal(r.body.section.model, 'filosofia:autore-pensiero:v1');
+    assert.equal(r.body.section.model, 'filosofia:autore-pensiero');
     assert.ok(/^v1:[0-9a-f]{8}$/.test(r.body.section.promptVersion), 'timbro prompt_version');
     assert.equal(r.body.section.verbosita, 'standard', 'timbro default verbosita');
     assert.equal(r.body.section.istruzione, 'secondaria', 'timbro default istruzione');
     assert.equal(calls, 1);
     assert.equal(lastBody.messages[0].role, 'system', 'contratto in system role');
     // seconda scheda con livelli custom: timbri + versione diversi
-    r = await asJson('POST', '/api/cards', { id: 'gen-2', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K', verbosita: 'essenziale', istruzione: 'primaria' });
+    r = await asJson('POST', '/api/cards', { id: 'gen-2', modelloId: 'filosofia:autore-pensiero', titolo: 'K', verbosita: 'essenziale', istruzione: 'primaria' });
     assert.equal(r.status, 201);
     assert.equal(r.body.card.verbosita, 'essenziale');
     r = await asJson('POST', '/api/cards/gen-2/generate/nuclei', {});
@@ -706,6 +720,7 @@ test('API wizard: materie/modelli/sezioni/fork + sezioniAttive + preview', async
     // --- materie ---
     let r = await asJson('POST', '/api/materie', { nome: '' });
     assert.equal(r.status, 400);
+    await seedAutorePensiero(asJson); // fixture: legacy non seminato
     r = await asJson('POST', '/api/materie', { id: 'musica', nome: 'Storia della musica', systemPrompt: 'Sei un musicologo.' });
     assert.equal(r.status, 201);
     assert.equal(r.body.materia.systemPrompt, 'Sei un musicologo.');
@@ -738,33 +753,29 @@ test('API wizard: materie/modelli/sezioni/fork + sezioniAttive + preview', async
     r = await asJson('POST', '/api/cards', { id: 'mw-1', modelloId: draftId, titolo: 'Prova' });
     assert.equal(r.status, 201); // ora valido
     r = await asJson('PATCH', '/api/models/' + encodeURIComponent(draftId) + '/sections/vita', { title: 'Cambio' });
-    assert.equal(r.status, 409); // congelato: ha schede
+    assert.equal(r.status, 200); // edit diretto anche con schede (niente versioning)
     r = await asJson('DELETE', '/api/models/' + encodeURIComponent(draftId));
-    assert.equal(r.status, 409);
+    assert.equal(r.status, 409); // con schede non si elimina
     r = await asJson('POST', '/api/models/' + encodeURIComponent(draftId) + '/fork', {});
-    assert.equal(r.status, 201);
-    assert.ok(r.body.model.id.endsWith(':v2'));
-    const v2 = r.body.model.id;
-    r = await asJson('PATCH', '/api/models/' + encodeURIComponent(v2) + '/sections/vita', { title: 'Vita e contesto' });
-    assert.equal(r.status, 200); // v2 senza schede: libero
-    r = await asJson('POST', '/api/models', { materiaId: 'filosofia', chiave: 'autore2', nome: 'Autore 2', fromTemplate: 'filosofia:autore-pensiero:v1' });
+    assert.equal(r.status, 404); // fork rimosso
+    r = await asJson('POST', '/api/models', { materiaId: 'filosofia', chiave: 'autore2', nome: 'Autore 2', fromTemplate: 'filosofia:autore-pensiero' });
     assert.equal(r.status, 201);
     assert.ok(r.body.model.schema.sections.length >= 5); // clone ereditato
     r = await asJson('POST', '/api/materie', { id: 'encoe', nome: 'Enoches' });
     assert.equal(r.status, 201);
-    r = await asJson('POST', '/api/models', { materiaId: 'encoe', chiave: 'autore2', nome: 'Autore 2', fromTemplate: 'filosofia:autore-pensiero:v1' });
+    r = await asJson('POST', '/api/models', { materiaId: 'encoe', chiave: 'autore2', nome: 'Autore 2', fromTemplate: 'filosofia:autore-pensiero' });
     assert.equal(r.status, 201);
     assert.equal(r.body.model.schema.cover.eyebrow, 'Scheda didattica · Enoches'); // clone tra materie: eyebrow adattata
     r = await asJson('DELETE', '/api/models/' + encodeURIComponent(r.body.model.id));
     assert.equal(r.status, 200); // senza schede: si elimina
 
     // --- sezioniAttive sulle cards ---
-    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Sub', sezioniAttive: ['vita'] });
+    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero', titolo: 'Sub', sezioniAttive: ['vita'] });
     assert.equal(r.status, 400); // required escluse
     assert.ok(r.body.error.message.includes('required'));
-    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere', 'nope'] });
+    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere', 'nope'] });
     assert.equal(r.status, 400); // chiave sconosciuta
-    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere'] });
+    r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero', titolo: 'Sub', sezioniAttive: ['vita', 'nuclei', 'opere'] });
     assert.equal(r.status, 201);
     assert.deepEqual(r.body.card.sezioniAttive, ['vita', 'nuclei', 'opere']);
     r = await asJson('PATCH', '/api/cards/mw-sub/sections/concetti', { corpo: { entries: [] } });
@@ -785,22 +796,18 @@ test('API wizard: materie/modelli/sezioni/fork + sezioniAttive + preview', async
     r = await asJson('PATCH', '/api/cards/mw-sub', { sezioniAttive: ['vita', 'nuclei', 'opere', 'concetti'] });
     assert.equal(r.status, 400); // ready: attive congelate
 
-    // --- standard=1: solo ultima versione valida (niente bozze, niente vecchie) ---
+    // --- elenco modelli: una sola riga per chiave, bozze incluse (niente versioning) ---
     r = await asJson('POST', '/api/models', { materiaId: 'filosofia', nome: 'Vuota' });
     assert.equal(r.status, 201); // draft senza sezioni
-    r = await asJson('GET', '/api/models?subject=filosofia&standard=1');
+    r = await asJson('GET', '/api/models?subject=filosofia');
     assert.equal(r.status, 200);
-    const stdKeys = r.body.models.map((m) => m.chiave + ':v' + m.versione);
-    assert.ok(!stdKeys.includes('bozza:v1'), 'bozza vuota esclusa');
-    assert.ok(!stdKeys.includes('autore-pensiero:v1'), 'legacy nascosto alla creazione');
-    assert.deepEqual(stdKeys.filter((k) => k.startsWith('autore:')), ['autore:v1'], 'solo autore standard');
-    assert.ok(stdKeys.filter((k) => k.startsWith('autore-pensiero:')).length <= 1, 'una sola versione per chiave');
-    assert.ok(stdKeys.includes('autore:v1') || stdKeys.includes('autore-pensiero:v1'), 'standard presenti: ' + stdKeys.join(','));
-    const v1count = r.body.models.filter((m) => m.id === 'filosofia:autore-pensiero:v1').length;
-    assert.ok(v1count <= 1, 'nessun duplicato di versione');
+    const ids = r.body.models.map((m) => m.id);
+    assert.ok(ids.includes('filosofia:vuota'), 'bozza inclusa');
+    assert.deepEqual(ids.filter((id) => id === 'filosofia:autore'), ['filosofia:autore'], 'una sola riga per chiave');
+    assert.equal(new Set(ids).size, ids.length, 'nessun duplicato');
 
     // --- preview prompt ---
-    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero%3Av1&sezione=nuclei');
+    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero&sezione=nuclei');
     assert.equal(r.status, 200);
     assert.ok(r.body.system.includes('SOLO con JSON valido'));
     assert.ok(r.body.user.includes('nuclei'));
@@ -855,18 +862,21 @@ test('seed guard: schema congelato con schede, libero senza', async () => {
     db.initSchema();
     db.upsertMateria({ id: 'm', nome: 'M' });
     const schemaA = { key: 'k', subject: 'm', name: 'K', version: 1, cover: { eyebrow: 'E', heroRole: 'hero' }, sections: [{ key: 'a', title: 'A', type: 'text', prompt: 'uno' }] };
-    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K', versione: 1, schema: schemaA });
-    // senza schede: il seed aggiorna
+    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K', schema: schemaA });
+    // upsert aggiorna sempre (niente freeze, niente versioni)
     const schemaB = { ...schemaA, sections: [{ key: 'a', title: 'A2', type: 'text', prompt: 'due' }] };
-    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K2', versione: 1, schema: schemaB });
-    assert.equal(db.getModello('m:k:v1').schema.sections[0].title, 'A2');
-    // con schede: nome sì, schema no
-    db.createScheda({ id: 's1', modelloId: 'm:k:v1', titolo: 'S' });
+    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K2', schema: schemaB });
+    assert.equal(db.getModello('m:k').schema.sections[0].title, 'A2');
+    // anche con schede: modifica diretta
+    db.createScheda({ id: 's1', modelloId: 'm:k', titolo: 'S' });
     const schemaC = { ...schemaB, sections: [{ key: 'a', title: 'A3', type: 'text', prompt: 'tre' }] };
-    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K3', versione: 1, schema: schemaC });
-    const kept = db.getModello('m:k:v1');
+    db.upsertModello({ materiaId: 'm', chiave: 'k', nome: 'K3', schema: schemaC });
+    const kept = db.getModello('m:k');
     assert.equal(kept.nome, 'K3');
-    assert.equal(kept.schema.sections[0].title, 'A2');
+    assert.equal(kept.schema.sections[0].title, 'A3');
+    // seedCore non sovrascrive i modelli esistenti
+    db.seedCore({ materie: [], modelli: [{ subject: 'm', key: 'k', name: 'K-seed', version: 9, sections: [{ key: 'a', title: 'Seed', type: 'text', prompt: 's' }] }] });
+    assert.equal(db.getModello('m:k').schema.sections[0].title, 'A3');
   } finally {
     if (previousDb === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previousDb;
     await rmDir7(dir, { recursive: true, force: true });
@@ -945,14 +955,14 @@ test('db livelli: default, timbri, stale-gate, preserve manuale, migrazione', as
     db.initSchema();
     db.seedCore({ materie: core.listMaterie(), modelli: [...core.listModelli('arte'), ...core.listModelli('filosofia'), ...core.listModelli('letteratura-italiana')] });
     // default = comportamento attuale
-    const dflt = db.createScheda({ id: 'lv-1', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K' });
+    const dflt = db.createScheda({ id: 'lv-1', modelloId: 'filosofia:autore-pensiero', titolo: 'K' });
     assert.equal(dflt.verbosita, 'standard');
     assert.equal(dflt.istruzione, 'secondaria');
     // valori custom + normalizzazione
-    const custom = db.createScheda({ id: 'lv-2', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K', verbosita: 'ESSENZIALE', istruzione: 'primaria' });
+    const custom = db.createScheda({ id: 'lv-2', modelloId: 'filosofia:autore-pensiero', titolo: 'K', verbosita: 'ESSENZIALE', istruzione: 'primaria' });
     assert.equal(custom.verbosita, 'essenziale');
     assert.equal(custom.istruzione, 'primaria');
-    const bad = db.createScheda({ id: 'lv-3', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K', verbosita: 'x', istruzione: 'y' });
+    const bad = db.createScheda({ id: 'lv-3', modelloId: 'filosofia:autore-pensiero', titolo: 'K', verbosita: 'x', istruzione: 'y' });
     assert.equal(bad.verbosita, 'standard');
     // generate timbra, manuale preserva
     db.saveSezione('lv-2', 'vita', { text: 'Vita.' }, { model: 'm', promptVersion: 'v1:abc', verbosita: 'essenziale', istruzione: 'primaria' });
@@ -977,7 +987,7 @@ test('db livelli: default, timbri, stale-gate, preserve manuale, migrazione', as
     assert.equal(blocked2.ok, false);
     assert.deepEqual(blocked2.stale.sort(), ['nuclei', 'opere']);
     // sezione manuale (senza timbro) non diventa mai stale
-    db.createScheda({ id: 'lv-4', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K', verbosita: 'essenziale', istruzione: 'primaria' });
+    db.createScheda({ id: 'lv-4', modelloId: 'filosofia:autore-pensiero', titolo: 'K', verbosita: 'essenziale', istruzione: 'primaria' });
     db.saveSezione('lv-4', 'vita', { text: 'A mano.' });
     db.saveSezione('lv-4', 'nuclei', { items: [{ title: 'T', text: 'x' }] });
     db.saveSezione('lv-4', 'opere', { works: [{ title: 'W', artist: 'A' }] });
@@ -991,7 +1001,7 @@ test('db livelli: default, timbri, stale-gate, preserve manuale, migrazione', as
     assert.ok(cols.includes('verbosita') && cols.includes('istruzione'));
     const zcols = db.getDb().prepare('PRAGMA table_info(sezioni)').all().map((c) => c.name);
     assert.ok(zcols.includes('verbosita') && zcols.includes('istruzione'));
-    const after = db.createScheda({ id: 'lv-5', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'K' });
+    const after = db.createScheda({ id: 'lv-5', modelloId: 'filosofia:autore-pensiero', titolo: 'K' });
     assert.equal(after.verbosita, 'standard');
   } finally {
     if (previous === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previous;
@@ -1036,11 +1046,12 @@ test('API livelli: validazione, PATCH, preview, stale-gate', async () => {
       body: body === undefined ? undefined : JSON.stringify(body),
     }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
 
-    let r = await asJson('POST', '/api/cards', { id: 'lv-bad', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'X', verbosita: ' prolissa ' });
+    await seedAutorePensiero(asJson); // fixture: legacy non seminato
+    let r = await asJson('POST', '/api/cards', { id: 'lv-bad', modelloId: 'filosofia:autore-pensiero', titolo: 'X', verbosita: ' prolissa ' });
     assert.equal(r.status, 400);
-    r = await asJson('POST', '/api/cards', { id: 'lv-bad', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'X', istruzione: 'medie' });
+    r = await asJson('POST', '/api/cards', { id: 'lv-bad', modelloId: 'filosofia:autore-pensiero', titolo: 'X', istruzione: 'medie' });
     assert.equal(r.status, 400);
-    r = await asJson('POST', '/api/cards', { id: 'lv-ok', modelloId: 'filosofia:autore-pensiero:v1', titolo: 'X', verbosita: 'approfondita', istruzione: 'universita' });
+    r = await asJson('POST', '/api/cards', { id: 'lv-ok', modelloId: 'filosofia:autore-pensiero', titolo: 'X', verbosita: 'approfondita', istruzione: 'universita' });
     assert.equal(r.status, 201);
     assert.equal(r.body.card.verbosita, 'approfondita');
     assert.equal(r.body.card.istruzione, 'universita');
@@ -1052,12 +1063,12 @@ test('API livelli: validazione, PATCH, preview, stale-gate', async () => {
     assert.equal(r.status, 200);
     assert.equal(r.body.card.verbosita, 'essenziale');
     // preview con livelli
-    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero%3Av1&sezione=vita&verbosita=essenziale&istruzione=primaria');
+    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero&sezione=vita&verbosita=essenziale&istruzione=primaria');
     assert.equal(r.status, 200);
     assert.ok(r.body.user.includes('max 110 parole'));
     assert.ok(r.body.system.includes('primaria. Lessico semplice'));
     assert.equal(r.body.verbosita, 'essenziale');
-    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero%3Av1&sezione=vita');
+    r = await asJson('GET', '/api/prompts/preview?modello=filosofia%3Aautore-pensiero&sezione=vita');
     assert.equal(r.status, 200);
     assert.ok(r.body.user.includes('max 180 parole'));
     // generate verso endpoint chiuso -> 500 (mappa errori LLM)
