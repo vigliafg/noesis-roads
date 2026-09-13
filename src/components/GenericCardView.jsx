@@ -27,6 +27,8 @@ function GenericCardView({ card, onBack }) {
   (Array.isArray(card.sezioni) ? card.sezioni : []).forEach(function (s) {
     if (s.verbosita || s.istruzione) timbri[s.chiave] = lvlLabel(s.verbosita || card.verbosita, s.istruzione || card.istruzione);
   });
+  const verMap = {};
+  (Array.isArray(card.verifiche) ? card.verifiche : []).forEach(function (v) { verMap[v.chiave] = v; });
 
   return (
     <main className="explore-page">
@@ -67,6 +69,9 @@ function GenericCardView({ card, onBack }) {
             <div className="overview-head">
               <div className="overview-heading"><span className="eyebrow">{subtitle}</span><h2>{def.title}</h2>
                 {timbri[def.key] && <span className="type-tag" title="Livelli di generazione della sezione">AI · {timbri[def.key]}</span>}
+                {verMap[def.key] && (verMap[def.key].dubbi > 0
+                  ? <span className="type-tag" title="Verifica web: punti da ricontrollare">⚠ {verMap[def.key].dubbi} da ricontrollare</span>
+                  : <span className="type-tag" title={'Verificato sul web · ' + (verMap[def.key].fonti || []).length + ' fonti'}>✓ Verificato</span>)}
               </div>
               <div className="font-controls" style={{ alignSelf: 'flex-start' }}>
                 <span className="font-label">A</span>
@@ -77,11 +82,18 @@ function GenericCardView({ card, onBack }) {
             </div>
             <div className="overview-card overview-ready">
               <SectionBlock def={def} corpo={corpi[def.key]} immagini={immagini} fontScale={fontScale} />
+              {verMap[def.key] && (verMap[def.key].fonti || []).length > 0 && (
+                <div className="overview-sources" style={{ marginTop: 12 }}>
+                  {(verMap[def.key].fonti || []).map(function (f, i) {
+                    return f.url ? <a key={i} href={f.url} target="_blank" rel="noopener noreferrer">↗ {f.title || f.url}</a> : null;
+                  })}
+                </div>
+              )}
             </div>
           </section>
         );
       })}
-      <p className="overview-disclaimer">Lezione generata con intelligenza artificiale (noesis-roads-creator) e verificata in fase di pubblicazione.</p>
+      <p className="overview-disclaimer">Lezione generata con intelligenza artificiale (può contenere errori): verifica su fonti indipendenti prima dell’uso didattico.</p>
     </main>
   );
 }

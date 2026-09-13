@@ -22,11 +22,12 @@ import {
   replaceComparisonPoints, listComparisonPoints, getFullComparison,
   // Nucleo generico (Fase 2): materie / modelli / schede-lezione / sezioni / immagini
   listMaterie, getMateria, upsertMateria, updateMateria, deleteMateria, listModelli, getModello,
-  upsertModello, updateModello, deleteModello, modelHasCards, seedCore, createScheda, getScheda, getSchedaFull,
+  upsertModello, updateModello, deleteModello, modelHasCards, seedCore, createScheda, getScheda, getSchedaFull, getVerifica,
   listSchede, updateScheda, deleteScheda, saveSezione, getSezione, approveScheda,
-  addImmagine, listImmagini, getImmagine, deleteImmagine
+  addImmagine, listImmagini, getImmagine, deleteImmagine, saveVerifica, listVerifiche, clearVerifica,
+  saveArricchimento, getArricchimento
 } from './db.mjs';
-import { callModel, VISION_MODEL, TEXT_MODEL, getOpenRouterApiKey,
+import { callModel, VISION_MODEL, TEXT_MODEL, VERIFY_MODEL, getOpenRouterApiKey,
   buildVisionPrompt, buildOverviewPrompt, buildTextPrompt, buildSimilarPrompt,
   normalizeAnalysis, normalizeOverview, normalizeSimilar, resolveSimilarImages } from '../server.mjs';
 import { listMaterie as materieRegistry, listModelli as modelliRegistry } from '../core/models.mjs';
@@ -869,6 +870,8 @@ function handleApi(req, res, urlPath) {
       ...cardPublic(full),
       modello: full.modello,
       sezioni: full.sezioni,
+      verifiche: full.verifiche || [],
+      arricchimenti: full.arricchimenti || [],
       immagini: (full.immagini || []).map((m) => ({ ...m, url: '/api/cards/' + id + '/images/' + m.id }))
     };
   }
@@ -926,6 +929,20 @@ function handleApi(req, res, urlPath) {
       if (s.required && !(attive || []).includes(s.key)) errs.push('sezione required esclusa: ' + s.key);
     }
     return errs;
+  }
+  // Stile della casa del modello (ereditato dalle schede): livelli + interruttori AI.
+  // Ritorna l'oggetto normalizzato oppure null se non valido.
+  function normModelDefaults(input) {
+    if (!input || typeof input !== 'object') return null;
+    const v = input.verbosita !== undefined ? String(input.verbosita).trim().toLowerCase() : 'standard';
+    const it = input.istruzione !== undefined ? String(input.istruzione).trim().toLowerCase() : 'secondaria';
+    if (!VERBOSITA.includes(v) || !ISTRUZIONE.includes(it)) return null;
+    const b = (x, fb) => (x === undefined ? fb : !!x);
+    return { verbosita: v, istruzione: it, arricchisci: b(input.arricchisci, false), verifica: b(input.verifica, false) };
+  }
+  function modelDefaults(schema) {
+    const d = (schema && schema.defaults) || {};
+    return normModelDefaults(d) || { verbosita: 'standard', istruzione: 'secondaria', arricchisci: false, verifica: false };
   }
   // Valida le definizioni di sezione presenti (permette modello draft senza sezioni).
   function checkSectionDefs(sections) {
@@ -987,6 +1004,11 @@ function handleApi(req, res, urlPath) {
         }
         const defErrs = checkSectionDefs(schema.sections);
         if (defErrs.length) return err(res, 400, 'Sezioni non valide: ' + defErrs.join('; '));
+        if (input.defaults !== undefined && input.defaults !== null) {
+          const d = normModelDefaults(input.defaults);
+          if (!d) return err(res, 400, 'defaults non validi (verbosita, istruzione, arricchisci, verifica)');
+          schema.defaults = d;
+        }
         if (getModello(`${materiaId}:${chiave}`)) return err(res, 409, 'Esiste già il modello ' + materiaId + ':' + chiave);
         const created = upsertModello({ materiaId, chiave, nome, schema });
         return json(res, 201, { model: created });
@@ -996,7 +1018,8 @@ function handleApi(req, res, urlPath) {
     }).catch(e => err(res, 400, e.message));
   }
 
-  // PATCH /api/models/:id { nome?, systemPrompt? } — ridenominazione/voce (lo schema via sections, diretto)
+  // PATCH /api/models/:id { nome?, systemPrompt?, defaults? } — ridenominazione/voce/stile (lo schema via sections, diretto)
+  // defaults: { verbosita?, istruzione?, arricchisci?, verifica? } — stile della casa ereditato dalle schede.
   if (method === 'PATCH' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'models') {
     return readBody(req).then((input) => {
       const current = getModello(parts[2]);
@@ -1008,6 +1031,11 @@ function handleApi(req, res, urlPath) {
       if (input.systemPrompt !== undefined) {
         if (String(input.systemPrompt).trim()) schema.system_prompt = String(input.systemPrompt);
         else delete schema.system_prompt;
+      }
+      if (input.defaults !== undefined && input.defaults !== null) {
+        const d = normModelDefaults({ ...(current.schema.defaults || {}), ...input.defaults });
+        if (!d) return err(res, 400, 'defaults non validi (verbosita, istruzione, arricchisci, verifica)');
+        schema.defaults = d;
       }
       const saved = updateModello(parts[2], { nome, schema });
       return json(res, 200, { model: saved });
@@ -1246,8 +1274,12 @@ function handleApi(req, res, urlPath) {
       if (verbErr) return err(res, 400, 'verbosita non valida (essenziale|standard|approfondita)');
       const istrErr = input.istruzione !== undefined && !ISTRUZIONE.includes(String(input.istruzione).trim().toLowerCase());
       if (istrErr) return err(res, 400, 'istruzione non valida (primaria|secondaria|universita)');
+      // Ereditarietà modello → scheda: livelli assenti = default del modello.
+      const dd = modelDefaults(modello.schema);
+      const verb = input.verbosita !== undefined ? String(input.verbosita).trim().toLowerCase() : dd.verbosita;
+      const istr = input.istruzione !== undefined ? String(input.istruzione).trim().toLowerCase() : dd.istruzione;
       try {
-        const created = createScheda({ id: input.id || null, modelloId: input.modelloId, titolo: input.titolo || '', sezioniAttive: attive, verbosita: input.verbosita, istruzione: input.istruzione });
+        const created = createScheda({ id: input.id || null, modelloId: input.modelloId, titolo: input.titolo || '', sezioniAttive: attive, verbosita: verb, istruzione: istr });
         return json(res, 201, { card: cardPublic(created) });
       } catch (e) {
         return err(res, String(e.message || '').includes('già una scheda') ? 409 : 400, e.message);
@@ -1335,15 +1367,211 @@ function handleApi(req, res, urlPath) {
     return readBody(req).then(async (input) => {
       const materia = getMateria(modello.materiaId);
       const { system, user, version } = assembleSectionPrompts({ materia, modello: modello.schema, sezione: def, titoloScheda: scheda.titolo, livello: String((input && input.livello) || ''), verbosita: scheda.verbosita, istruzione: scheda.istruzione });
+      // Contesto arricchito (Sonar): se richiesto e presente, i fatti guidano la generazione.
+      let userEff = user;
+      let contestoUsato = false;
+      if (input && input.usaContesto) {
+        const pack = getArricchimento(parts[2], parts[4]);
+        if (pack && ((pack.fatti || []).length || (pack.fonti || []).length)) {
+          userEff += '\n\n— CONTESTO DA RICERCA (usalo come base fattuale, non inventare ciò che contrasta) —\n' +
+            (pack.fatti || []).map((f, i) => `(${i + 1}) ${f}`).join('\n') +
+            ((pack.fonti || []).length ? '\nFonti: ' + pack.fonti.map((f) => f.url).join(', ') : '');
+          contestoUsato = true;
+        }
+      }
       try {
-        const raw = await callModel(TEXT_MODEL, [{ type: 'text', text: user }], apiKey, undefined, { system });
+        const raw = await callModel(TEXT_MODEL, [{ type: 'text', text: userEff }], apiKey, undefined, { system });
         const corpo = normalizeSectionBody(def.type, raw.data);
         const warnings = validateBody(def.type, corpo);
         if (isBodyEmpty(def.type, corpo)) warnings.push('sezione vuota: il modello non ha restituito contenuti, riprova la generazione');
+        if (contestoUsato) warnings.push('generata con contesto arricchito');
         const saved = saveSezione(parts[2], parts[4], corpo, { model: modello.id, promptVersion: version, verbosita: scheda.verbosita, istruzione: scheda.istruzione });
         return json(res, 200, { section: saved, warnings });
       } catch (e) { console.error('ERR genSection:', e); return err(res, 500, e.message); }
     }).catch(e => err(res, 400, e.message));
+  }
+
+  // POST /api/cards/:id/verify — verifica i fatti via modello di ricerca (a lotti).
+  // Input: { sezioni?: [chiavi] } (default: attive non-image con corpo non vuoto).
+  // Output: { verifiche: [{chiave, esiti: [{affermazione, esito, correzione?, url?}], accettati, fonti: [{title,url}], dubbi}], saltate: [chiavi] }.
+  // Lotti da max 3 sezioni con retry: una risposta troncata non invalida le altre.
+  // Mai bloccante per il flusso: senza chiave -> 503; tutto inutilizzabile -> 502.
+  async function verificaSezioni(schedaId, wanted, apiKey) {
+    const scheda = getScheda(schedaId);
+    if (!scheda) throw new Error('Scheda non trovata');
+    const full = getSchedaFull(schedaId);
+    const attive = scheda.sezioniAttive;
+    const want = Array.isArray(wanted) && wanted.length ? wanted.map(String) : null;
+    const targets = (full.sezioni || []).filter((s) => {
+      if (want && !want.includes(s.chiave)) return false;
+      if (attive && !attive.includes(s.chiave)) return false;
+      const t = JSON.stringify(s.corpo || {});
+      return t.length > 20 && t.length < 6000;
+    });
+    if (!targets.length) throw new Error('Nessuna sezione con contenuti da verificare');
+    const system = 'Sei un fact-checker rigoroso. Rispondi con un solo oggetto JSON, senza altro testo.';
+    const batchOf = (t) => 'Scheda "' + scheda.titolo + '". Verifica OGNI affermazione fattuale (nomi, date, opere, luoghi, citazioni) delle sezioni seguenti usando la ricerca web. ' +
+      'Max 8 affermazioni per sezione. Per ciascuna: esito "confermata" | "dubbia" | "errata", eventuale correzione in una frase, URL della fonte usata. ' +
+      'Ignora giudizi di valore e indicazioni didattiche. Esempio: {"verifiche":[{"sezione":"vita","esiti":[{"affermazione":"...","esito":"confermata","url":"..."}]}]}.\n' +
+      JSON.stringify(t.map((s) => ({ sezione: s.chiave, titolo: s.titolo, corpo: s.corpo }))).slice(0, 9000);
+    const lots = [];
+    for (let i = 0; i < targets.length; i += 3) lots.push(targets.slice(i, i + 3));
+    const byKey = {};
+    const webFonti = [];
+    const saltate = [];
+    for (const lot of lots) {
+      let vlist = null;
+      for (let attempt = 0; attempt < 2 && !vlist; attempt++) {
+        try {
+          const raw = await callModel(VERIFY_MODEL, [{ type: 'text', text: batchOf(lot) }], apiKey, globalThis.fetch, { system, maxTokens: 8000 });
+          if (Array.isArray(raw.citations)) {
+            for (const c of raw.citations) {
+              if (c && c.url && !webFonti.some((w) => w.url === c.url)) webFonti.push({ title: c.title || '', url: c.url });
+            }
+          }
+          const data = raw && raw.data;
+          if (data && Array.isArray(data.verifiche)) vlist = data.verifiche;
+        } catch (e) { /* retry */ }
+      }
+      if (!vlist) { lot.forEach((s) => saltate.push(s.chiave)); continue; }
+      for (const t of lot) {
+        const found = vlist.find((v) => v && String(v.sezione || '') === t.chiave);
+        byKey[t.chiave] = found && Array.isArray(found.esiti) ? found.esiti
+          .filter((e) => e && e.affermazione).map((e) => ({
+            affermazione: String(e.affermazione).slice(0, 300),
+            esito: ['confermata', 'dubbia', 'errata'].includes(e.esito) ? e.esito : 'dubbia',
+            correzione: String(e.correzione || '').slice(0, 300),
+            url: String(e.url || '').slice(0, 500),
+          })).slice(0, 10) : [];
+      }
+    }
+    if (!Object.keys(byKey).length) throw new Error('Verifica non riuscita: risposta inutilizzabile');
+    const out = [];
+    for (const t of targets) {
+      if (!(t.chiave in byKey)) continue;
+      const esiti = byKey[t.chiave];
+      const fonti = webFonti.slice(0, 10);
+      const saved = saveVerifica(schedaId, t.chiave, { esiti, fonti, model: VERIFY_MODEL });
+      const acc = new Set(saved.accettati || []);
+      out.push({ chiave: t.chiave, esiti, accettati: saved.accettati, fonti, dubbi: esiti.filter((e) => e.esito !== 'confermata' && !acc.has(e.affermazione)).length });
+    }
+    return { verifiche: out, saltate };
+  }
+  if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'verify') {
+    const scheda = getScheda(parts[2]);
+    if (!scheda) return err(res, 404, 'Scheda non trovata');
+    return readBody(req).then(async (input) => {
+      const apiKey = getOpenRouterApiKey();
+      if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
+      try {
+        return json(res, 200, await verificaSezioni(parts[2], input.sezioni, apiKey));
+      } catch (e) {
+        const msg = e.message || 'errore';
+        if (/Nessuna sezione|non configurata|inutilizzabile/.test(msg)) {
+          const code = /non configurata/.test(msg) ? 503 : /Nessuna sezione/.test(msg) ? 400 : 502;
+          return err(res, code, msg === 'Verifica non riuscita: risposta inutilizzabile' ? msg : 'Verifica non riuscita: ' + msg);
+        }
+        return err(res, 500, msg);
+      }
+    }).catch((e) => err(res, 500, e.message));
+  }
+
+  // POST /api/cards/:id/enrich/:sez — research pack Sonar come contesto di lavoro.
+  // Output: { fatti: [{punto}], fonti: [{title,url}] }, salvato in arricchimenti.
+  // Mai bloccante: senza chiave -> 503; risposta inutilizzabile -> 502.
+  if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'enrich') {
+    const scheda = getScheda(parts[2]);
+    if (!scheda) return err(res, 404, 'Scheda non trovata');
+    const modello = getModello(scheda.modelloId);
+    const def = modello && modello.schema.sections.find((s) => s.key === parts[4]);
+    if (!def) return err(res, 404, 'Sezione sconosciuta per questo modello: ' + parts[4]);
+    if (def.type === 'image') return err(res, 400, 'Le sezioni immagine non hanno contesto testuale.');
+    return readBody(req).then(async () => {
+      const apiKey = getOpenRouterApiKey();
+      if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
+      const materia = getMateria(modello.materiaId);
+      const system = 'Sei un ricercatore. Rispondi con un solo oggetto JSON, senza altro testo.';
+      const user = 'Scheda "' + scheda.titolo + '" (' + ((materia && materia.nome) || modello.materiaId) + '), ' +
+        'sezione "' + (def.title || def.key) + '"' + (def.prompt ? ' — obiettivo: ' + def.prompt : '') + '. ' +
+        'Raccogli con la ricerca web i fatti essenziali e le fonti migliori per scrivere questa sezione: ' +
+        'date, nomi, opere, luoghi, riferimenti precisi. Max 10 fatti brevi e 8 fonti. ' +
+        'Esempio: {"fatti":[{"punto":"..."}], "fonti":[{"title":"...","url":"..."}]}.';
+      let raw;
+      try {
+        raw = await callModel(VERIFY_MODEL, [{ type: 'text', text: user }], apiKey, globalThis.fetch, { system, maxTokens: 2500 });
+      } catch (e) { return err(res, 502, 'Ricerca non riuscita (' + (e.message || e) + ')'); }
+      const data = raw && raw.data;
+      const fatti = Array.isArray(data && data.fatti) ? data.fatti
+        .filter((f) => f && (f.punto || f.fatto || f.text)).map((f) => String(f.punto || f.fatto || f.text).slice(0, 400)).slice(0, 10) : [];
+      const webFonti = Array.isArray(raw.citations) ? raw.citations : [];
+      const fonti = (Array.isArray(data && data.fonti) && data.fonti.length ? data.fonti : webFonti)
+        .filter((f) => f && (f.url || typeof f === 'string')).map((f) => typeof f === 'string'
+          ? { title: '', url: f } : { title: String(f.title || '').slice(0, 200), url: String(f.url || '').slice(0, 500) })
+        .filter((f) => f.url).slice(0, 8);
+      if (!fatti.length && !fonti.length) return err(res, 502, 'Ricerca non riuscita: risposta inutilizzabile');
+      const saved = saveArricchimento(parts[2], parts[4], { fatti, fonti, model: VERIFY_MODEL });
+      return json(res, 200, { chiave: parts[4], fatti: saved.fatti, fonti: saved.fonti });
+    }).catch((e) => err(res, 500, e.message));
+  }
+
+  // POST /api/cards/:id/verifiche/:sez/accetta { affermazione, accettato=true } — segna un dubbio come accettato/rifiutato.
+  if (method === 'POST' && parts.length === 6 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'verifiche' && parts[5] === 'accetta') {
+    if (!getScheda(parts[2])) return err(res, 404, 'Scheda non trovata');
+    return readBody(req).then((input) => {
+      const aff = String((input && input.affermazione) || '').trim();
+      if (!aff) return err(res, 400, 'affermazione obbligatoria');
+      const cur = getVerifica(parts[2], parts[4]) || { esiti: [], fonti: [], accettati: [] };
+      const set = new Set(cur.accettati || []);
+      if (input.accettato === false) set.delete(aff);
+      else set.add(aff);
+      const saved = saveVerifica(parts[2], parts[4], { esiti: cur.esiti || [], fonti: cur.fonti || [], model: cur.model || '', accettati: [...set] });
+      return json(res, 200, { verifica: saved });
+    }).catch((e) => err(res, 400, e.message));
+  }
+
+  // POST /api/cards/:id/applica-correzioni { sezione, correzioni: [{affermazione, correzione}] }.
+  // Spark riscrive la sezione incorporando le correzioni (cambia il minimo indispensabile).
+  // Salva come revisione manuale: timbri livelli preservati, verifica della sezione da rifare.
+  if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'applica-correzioni') {
+    const scheda = getScheda(parts[2]);
+    if (!scheda) return err(res, 404, 'Scheda non trovata');
+    return readBody(req).then(async (input) => {
+      const apiKey = getOpenRouterApiKey();
+      if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
+      const modello = getModello(scheda.modelloId);
+      const key = String((input && input.sezione) || '').trim();
+      const corr = Array.isArray(input && input.correzioni) ? input.correzioni.filter((c) => c && c.affermazione) : [];
+      const def = modello && modello.schema.sections.find((s) => s.key === key);
+      if (!def) return err(res, 404, 'Sezione sconosciuta per questo modello: ' + (key || '?'));
+      if (!corr.length) return err(res, 400, 'correzioni vuote');
+      const full = getSchedaFull(parts[2]);
+      const sez = (full.sezioni || []).find((s) => s.chiave === key);
+      const corpo = (sez && sez.corpo) || {};
+      const system = 'Sei un editor preciso. Rispondi SOLO con JSON valido nella forma richiesta, senza altro testo.';
+      const user = JSON.stringify({
+        compito: 'Riscrivi il contenuto della sezione incorporando le correzioni. Cambia il minimo indispensabile: conserva stile, lunghezza e tutte le parti non toccate dalle correzioni.',
+        sezione: { chiave: def.key, titolo: def.title, type: def.type },
+        contenutoAttuale: corpo,
+        correzioni: corr.map((c) => ({ affermazione: String(c.affermazione).slice(0, 300), correzione: String(c.correzione || '').slice(0, 300) })),
+      });
+      let raw;
+      try {
+        raw = await callModel(TEXT_MODEL, [{ type: 'text', text: user }], apiKey, globalThis.fetch, { system, maxTokens: 4000 });
+      } catch (e) { return err(res, 502, 'Riscrittura non riuscita (' + (e.message || e) + ')'); }
+      const data = raw && raw.data;
+      const nuovo = (data && typeof data === 'object' && !Array.isArray(data) && (data.corpo || data.text || data.items || data.works || data.entries || data.chapters || data.a)) ? (data.corpo || data) : null;
+      if (!nuovo) return err(res, 502, 'Riscrittura non riuscita: risposta inutilizzabile');
+      const corpoNuovo = normalizeSectionBody(def.type, nuovo);
+      if (isBodyEmpty(def.type, corpoNuovo)) return err(res, 502, 'Riscrittura non riuscita: contenuto vuoto');
+      const saved = saveSezione(parts[2], key, corpoNuovo);
+      // Testo cambiato: riverifica subito così la sezione resta nel report (di norma "tutto confermato").
+      let riverifica = null;
+      try {
+        const vr = await verificaSezioni(parts[2], [key], apiKey);
+        riverifica = (vr.verifiche || []).find((v) => v.chiave === key) || null;
+      } catch (e) { /* la sezione resta senza verifica: l'utente la rilancia */ }
+      return json(res, 200, { section: saved, warnings: corpoNuovo && validateBody(def.type, corpoNuovo), verifica: riverifica });
+    }).catch((e) => err(res, 500, e.message));
   }
 
   // GET /api/prompts/preview?modello=<id>&sezione=<key>[&titolo=][&livello=][&verbosita=][&istruzione=]
@@ -1358,6 +1586,7 @@ function handleApi(req, res, urlPath) {
   }
 
   // POST /api/cards/:id/approve — ready (+ gate required come il legacy)
+  // Controllo link non bloccante: URL irraggiungibili segnalati in linkWarnings (mai inventare Fonti).
   if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'approve') {
     const scheda = getScheda(parts[2]);
     if (!scheda) return err(res, 404, 'Scheda non trovata');
@@ -1368,7 +1597,25 @@ function handleApi(req, res, urlPath) {
         : '';
       return err(res, 400, 'Genera e salva prima i contenuti: sezioni mancanti: ' + result.missing.join(', ') + '.' + staleMsg);
     }
-    return json(res, 200, { ok: true, status: 'ready', card: cardPublic(result.scheda) });
+    const seen = new Set();
+    const urls = [];
+    const full = getSchedaFull(parts[2]);
+    for (const s of (full && full.sezioni) || []) {
+      const found = JSON.stringify(s.corpo || {}).match(/https?:\/\/[^\s"'<>\\]+/g) || [];
+      for (const u of found) {
+        const clean = u.replace(/[.,;:!?)\]]+$/, '');
+        if (!seen.has(clean)) { seen.add(clean); urls.push(clean); }
+      }
+    }
+    const check = (u) => Promise.race([
+      fetch(u, { method: 'HEAD', redirect: 'follow', headers: { 'User-Agent': 'noesis-roads-didattico/1.0' } })
+        .then((r) => ({ u, ok: r.ok || r.status === 405 || r.status === 403 })),
+      new Promise((resolve) => setTimeout(() => resolve({ u, ok: 'timeout' }), 8000)),
+    ]).catch(() => ({ u, ok: false }));
+    return Promise.all(urls.slice(0, 20).map(check)).then((checked) => {
+      const bad = checked.filter((c) => c.ok !== true).map((c) => c.u);
+      return json(res, 200, { ok: true, status: 'ready', card: cardPublic(result.scheda), linkWarnings: bad });
+    });
   }
 
   // POST /api/cards/:id/images { ruolo, imageDataUrl } — upload immagine (BLOB)

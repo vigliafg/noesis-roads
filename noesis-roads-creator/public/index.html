@@ -678,6 +678,9 @@ function cardApplyFull(s, full) {
   (full.modello.schema.sections || []).forEach(function (def) { s.corpi[def.key] = cardEmptyBody(def.type); });
   (full.sezioni || []).forEach(function (sez) { s.corpi[sez.chiave] = sez.corpo || cardEmptyBody((full.modello.schema.sections.find(function (d) { return d.key === sez.chiave; }) || {}).type); });
   s.immagini = full.immagini || [];
+  s.verifiche = full.verifiche || [];
+  s.arricchimenti = {};
+  (full.arricchimenti || []).forEach(function (a) { s.arricchimenti[a.chiave] = a; });
 }
 function cardActiveDefs(s) {
   var defs = ((s.modello && s.modello.schema && s.modello.schema.sections) || []);
@@ -870,9 +873,11 @@ function renderCardStudio() {
       html += '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">' + esc(def.title) +
         (def.required ? ' · obbligatoria' : '') + ' · ' + esc(def.type) + '<span id="cs-badge-' + esc(def.key) + '">' + lvlBadge(s, def.key) + '</span></span>' +
         '<span style="display:flex;gap:8px">' +
+        (def.type !== 'image' ? '<button class="btn small" data-cs-ctx="' + esc(def.key) + '" title="Cerca fatti e fonti sul web come base di lavoro">📚 Contesto</button>' : '') +
         (def.type !== 'image' ? '<button class="btn small" data-cs-gen="' + esc(def.key) + '">✨ Genera</button>' : '') +
         '<button class="btn small primary" data-cs-save="' + esc(def.key) + '">💾 Salva sezione</button></span></div>' +
-        '<div id="cs-ed-' + esc(def.key) + '">' + cardSectionEditor(s, def) + '</div></div>';
+        '<div id="cs-ed-' + esc(def.key) + '">' + cardSectionEditor(s, def) + '</div>' +
+        '<div id="cs-ctx-' + esc(def.key) + '">' + cardCtxHtml(s, def.key) + '</div></div>';
     });
     html += '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:20px">' +
       '<button class="btn primary" id="csGenAll" style="padding:14px 22px">⚡ Genera tutte le sezioni</button>' +
@@ -882,12 +887,46 @@ function renderCardStudio() {
         return stale.length ? '<button class="btn" id="csRegenStale" style="padding:14px 22px">🔄 Rigenera le ' + stale.length + ' stale con questi livelli</button>' : '';
       })() +
       '<button class="btn" id="csSaveAll" style="padding:14px 22px">💾 Salva tutto</button>' +
+      '<button class="btn" id="csVerify" style="padding:14px 22px">🔍 Verifica fatti</button>' +
       '<button class="btn green" id="csApprove" style="padding:14px 22px">✅ Approva</button>' +
       '<button class="btn ghost" id="csDelete">🗑 Elimina</button>' +
       '<span class="step-note" id="csNote">Genera o compila le sezioni, salva ciascuna, poi approva.</span></div>';
+    html += cardVerificheHtml(s);
   }
   appEl.innerHTML = html;
   bindCardStudio(s);
+}
+function cardVerificheHtml(s) {
+  var vers = Array.isArray(s.verifiche) ? s.verifiche : [];
+  if (!vers.length) return '';
+  var html = '<div class="card" style="margin-top:18px"><div class="step-head"><span class="eyebrow">🔍 Verifica fatti</span></div>';
+  vers.forEach(function (v) {
+    var acc = {};
+    (v.accettati || []).forEach(function (a) { acc[a] = true; });
+    var aperti = (v.esiti || []).filter(function (e) { return e.esito !== 'confermata' && !acc[e.affermazione]; });
+    var chiusi = (v.accettati || []).filter(function (a) { return (v.esiti || []).some(function (e) { return e.affermazione === a; }); });
+    html += '<p style="margin:8px 0 4px"><strong>' + esc(v.chiave) + '</strong> — ' +
+      (aperti.length ? '<span>⚠ ' + aperti.length + ' da ricontrollare</span>' : '<span>✓ tutto confermato</span>') +
+      (aperti.length > 1 ? ' <button class="btn small" data-vf-all="' + esc(v.chiave) + '">✅ Applica tutte le correzioni</button>' : '') + '</p>';
+    aperti.slice(0, 8).forEach(function (e) {
+      var idx = (v.esiti || []).indexOf(e);
+      html += '<p class="step-note" style="margin:2px 0 2px 12px">• ' + esc(e.affermazione) + ' → <strong>' + esc(e.esito) + '</strong>' +
+        (e.correzione ? ' — ' + esc(e.correzione) : '') +
+        (e.url ? ' <a href="' + esc(e.url) + '" target="_blank" rel="noopener">fonte</a>' : '') +
+        '<br /><button class="btn small" data-vf-apply="' + esc(v.chiave) + ':' + idx + '">✅ Applica</button> ' +
+        '<button class="btn small ghost" data-vf-keep="' + esc(v.chiave) + ':' + idx + '">👍 Tieni così</button> ' +
+        '<button class="btn small ghost" data-vf-retry="' + esc(v.chiave) + '">🔍 Ricontrolla</button></p>';
+    });
+    chiusi.slice(0, 8).forEach(function (a) {
+      var idx = (v.esiti || []).findIndex(function (e) { return e.affermazione === a; });
+      html += '<p class="step-note" style="margin:2px 0 2px 12px">• <s>' + esc(a) + '</s> <span>accettato da te</span> ' +
+        '<button class="btn small ghost" data-vf-keep="' + esc(v.chiave) + ':' + idx + '">riapri</button></p>';
+    });
+    (v.fonti || []).slice(0, 4).forEach(function (f) {
+      if (f.url) html += '<p class="step-note" style="margin:2px 0 2px 12px">↗ <a href="' + esc(f.url) + '" target="_blank" rel="noopener">' + esc(f.title || f.url) + '</a></p>';
+    });
+  });
+  return html + '</div>';
 }
 function cardSectionEditor(s, def) {
   var b = s.corpi[def.key] || cardEmptyBody(def.type);
@@ -991,7 +1030,12 @@ function bindCardStudio(s) {
       if (!s.materiaId) { s.checked = null; render(); return; }
       api('/api/models?subject=' + encodeURIComponent(s.materiaId)).then(function (m) {
         s.modelli = m.models || [];
-        if (s.modelli.length) s.modelloId = s.modelli[0].id || (s.modelli[0].materiaId + ':' + s.modelli[0].chiave);
+        if (s.modelli.length) {
+          s.modelloId = s.modelli[0].id || (s.modelli[0].materiaId + ':' + s.modelli[0].chiave);
+          var dd0 = (s.modelli[0].schema && s.modelli[0].schema.defaults) || {};
+          s.verbosita = dd0.verbosita || 'standard';
+          s.istruzione = dd0.istruzione || 'secondaria';
+        }
         s.checked = null;
         render();
       }).catch(function (e) { toast(e.message); });
@@ -1001,6 +1045,15 @@ function bindCardStudio(s) {
   if (mod) mod.onchange = function () {
     s.modelloId = mod.value;
     s.checked = null;
+    if (!s.id) {
+      // Ereditarietà modello → scheda: livelli default del modello scelto.
+      var found = (s.modelli || []).find(function (x) { return (x.id || (x.materiaId + ':' + x.chiave)) === s.modelloId; });
+      var dd = (found && found.schema && found.schema.defaults) || {};
+      s.verbosita = dd.verbosita || 'standard';
+      s.istruzione = dd.istruzione || 'secondaria';
+      render();
+      return;
+    }
     var wrap = document.getElementById('csSections');
     if (wrap) { wrap.innerHTML = csSectionPicker(s); bindCardStudio(s); }
   };
@@ -1089,9 +1142,26 @@ function bindCardStudio(s) {
       refreshCardSection(s, parts[0]);
     };
   });
-  // genera / salva per sezione
+  // genera / salva / contesto per sezione
   appEl.querySelectorAll('[data-cs-gen]').forEach(function (btn) {
     btn.onclick = function () { cardGenSection(s, btn.getAttribute('data-cs-gen'), btn); };
+  });
+  appEl.querySelectorAll('[data-cs-genctx]').forEach(function (btn) {
+    btn.onclick = function () { cardGenSection(s, btn.getAttribute('data-cs-genctx'), btn, true); };
+  });
+  appEl.querySelectorAll('[data-cs-ctx]').forEach(function (btn) {
+    btn.onclick = function () {
+      var key = btn.getAttribute('data-cs-ctx');
+      btn.disabled = true;
+      var old = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner"></span>';
+      post('/api/cards/' + encodeURIComponent(s.id) + '/enrich/' + encodeURIComponent(key), {}).then(function (r) {
+        s.arricchimenti = s.arricchimenti || {};
+        s.arricchimenti[key] = { chiave: key, fatti: r.fatti || [], fonti: r.fonti || [] };
+        refreshCtxPanel(s, key);
+        toast('Contesto pronto: leggilo, poi genera', true);
+      }).catch(function (e) { toast(e.message); }).then(function () { btn.disabled = false; btn.innerHTML = old; });
+    };
   });
   appEl.querySelectorAll('[data-cs-save]').forEach(function (btn) {
     btn.onclick = function () { cardSaveSection(s, btn.getAttribute('data-cs-save'), btn); };
@@ -1142,12 +1212,100 @@ function bindCardStudio(s) {
   if (regen) regen.onclick = function () { cardGenAll(s, regen, true); };
   var saveAll = document.getElementById('csSaveAll');
   if (saveAll) saveAll.onclick = function () { cardSaveAll(s, saveAll); };
+  var verify = document.getElementById('csVerify');
+  if (verify) verify.onclick = function () {
+    verify.disabled = true;
+    verify.textContent = '🔍 Verifica in corso…';
+    post('/api/cards/' + encodeURIComponent(s.id) + '/verify', {}).then(function (r) {
+      var map = {};
+      ((r && r.verifiche) || []).forEach(function (v) { map[v.chiave] = v; });
+      s.verifiche = Object.keys(map).map(function (k) { return map[k]; });
+      var dubbi = s.verifiche.reduce(function (n, v) { return n + (v.dubbi || 0); }, 0);
+      var salt = (r && r.saltate) || [];
+      toast((dubbi ? 'Verifica: ' + dubbi + ' punti da ricontrollare' : 'Verifica: tutto confermato') + (salt.length ? ' (' + salt.length + ' sezioni saltate, riprova)' : ''), !dubbi && !salt.length);
+      render();
+    }).catch(function (e) { toast(e.message); verify.disabled = false; verify.textContent = '🔍 Verifica fatti'; });
+  };
+  var vfFind = function (key) { return (s.verifiche || []).find(function (v) { return v.chiave === key; }); };
+  var vfRefresh = function (key) {
+    return api('/api/cards/' + encodeURIComponent(s.id)).then(function (full) {
+      cardApplyFull(s, full);
+      render();
+    });
+  };
+  appEl.querySelectorAll('[data-vf-apply]').forEach(function (b) {
+    b.onclick = function () {
+      var parts = b.getAttribute('data-vf-apply').split(':');
+      var key = parts[0], v = vfFind(key), e = v && v.esiti[Number(parts[1])];
+      if (!e) return;
+      if (!e.correzione) { toast('Nessuna correzione proposta per questo punto: correggi a mano'); return; }
+      b.disabled = true;
+      post('/api/cards/' + encodeURIComponent(s.id) + '/applica-correzioni', { sezione: key, correzioni: [{ affermazione: e.affermazione, correzione: e.correzione }] }).then(function (r) {
+        if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
+        var rv = r.verifica;
+        var ndubbi = rv ? rv.dubbi : null;
+        toast(ndubbi === 0 ? 'Correzione applicata e riverificata: tutto confermato' : 'Correzione applicata e riverificata' + (ndubbi === null ? ' (riverifica non riuscita, rilanciala)' : ''), true);
+        refreshCardSection(s, key);
+        vfRefresh(key);
+      }).catch(function (err) { toast(err.message); b.disabled = false; });
+    };
+  });
+  appEl.querySelectorAll('[data-vf-all]').forEach(function (b) {
+    b.onclick = function () {
+      var key = b.getAttribute('data-vf-all');
+      var v = vfFind(key);
+      var acc = {};
+      (v.accettati || []).forEach(function (a) { acc[a] = true; });
+      var list = (v.esiti || []).filter(function (e) { return e.esito !== 'confermata' && !acc[e.affermazione] && e.correzione; });
+      if (!list.length) { toast('Nessuna correzione da applicare'); return; }
+      if (!confirm('Applicare ' + list.length + ' correzioni alla sezione ' + key + '? Il testo verrà riscritto.')) return;
+      b.disabled = true;
+      post('/api/cards/' + encodeURIComponent(s.id) + '/applica-correzioni', { sezione: key, correzioni: list.map(function (e) { return { affermazione: e.affermazione, correzione: e.correzione }; }) }).then(function (r) {
+        if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
+        var rv2 = r.verifica;
+        toast(rv2 && rv2.dubbi === 0 ? 'Correzioni applicate e riverificate: tutto confermato' : 'Correzioni applicate e riverificate', true);
+        refreshCardSection(s, key);
+        vfRefresh(key);
+      }).catch(function (err) { toast(err.message); b.disabled = false; });
+    };
+  });
+  appEl.querySelectorAll('[data-vf-keep]').forEach(function (b) {
+    b.onclick = function () {
+      var parts = b.getAttribute('data-vf-keep').split(':');
+      var key = parts[0], v = vfFind(key), e = v && v.esiti[Number(parts[1])];
+      if (!e) return;
+      var acc = {};
+      (v.accettati || []).forEach(function (a) { acc[a] = true; });
+      var to = !acc[e.affermazione];
+      post('/api/cards/' + encodeURIComponent(s.id) + '/verifiche/' + encodeURIComponent(key) + '/accetta', { affermazione: e.affermazione, accettato: to }).then(function (r) {
+        var i = (s.verifiche || []).findIndex(function (x) { return x.chiave === key; });
+        if (i >= 0) s.verifiche[i] = r.verifica;
+        render();
+      }).catch(function (err) { toast(err.message); });
+    };
+  });
+  appEl.querySelectorAll('[data-vf-retry]').forEach(function (b) {
+    b.onclick = function () {
+      var key = b.getAttribute('data-vf-retry');
+      b.disabled = true;
+      post('/api/cards/' + encodeURIComponent(s.id) + '/verify', { sezioni: [key] }).then(function (r) {
+        var map = {};
+        (s.verifiche || []).forEach(function (x) { map[x.chiave] = x; });
+        ((r && r.verifiche) || []).forEach(function (x) { map[x.chiave] = x; });
+        s.verifiche = Object.keys(map).map(function (k) { return map[k]; });
+        render();
+      }).catch(function (err) { toast(err.message); b.disabled = false; });
+    };
+  });
   var approve = document.getElementById('csApprove');
   if (approve) approve.onclick = function () {
     approve.disabled = true;
     post('/api/cards/' + encodeURIComponent(s.id) + '/approve', {}).then(function (r) {
       s.stato = 'ready';
       var viewer = (window.CREATOR_DATA && window.CREATOR_DATA.viewerUrl) || ('http://' + (location.hostname || '127.0.0.1') + ':18000/');
+      if (r.linkWarnings && r.linkWarnings.length) {
+        toast('Approvata, ma ' + r.linkWarnings.length + ' link non raggiungibili: ' + r.linkWarnings.slice(0, 3).join(', '));
+      }
       toastUndo('Scheda approvata: pronta nel viewer.', '👁 Vedi', function () {
         window.open(viewer.replace(/\/$/, '') + '/?open=' + encodeURIComponent(s.id), '_blank');
       });
@@ -1175,6 +1333,7 @@ function cardSaveSection(s, key, btn) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
   patch('/api/cards/' + encodeURIComponent(s.id) + '/sections/' + encodeURIComponent(key), { corpo: s.corpi[key] }).then(function (r) {
     s.corpi[key] = (r.section && r.section.corpo) || s.corpi[key];
+    s.verifiche = (s.verifiche || []).filter(function (v) { return v.chiave !== key; }); // contenuto cambiato: rifai la verifica
     toast('Sezione salvata', true);
     if (btn) { btn.disabled = false; btn.innerHTML = old; }
   }).catch(function (e) { toast(e.message); if (btn) { btn.disabled = false; btn.innerHTML = old; } });
@@ -1196,16 +1355,71 @@ function refreshSecBadge(s, key) {
   var el = document.getElementById('cs-badge-' + key);
   if (el) el.innerHTML = lvlBadge(s, key);
 }
-function cardGenSection(s, key, btn) {
+function cardCtxHtml(s, key) {
+  var pack = s.arricchimenti && s.arricchimenti[key];
+  if (!pack) return '';
+  var html = '<div class="card" style="background:var(--paper);margin:8px 0 4px;padding:10px 12px"><p style="margin:0 0 6px"><strong>📚 Contesto di lavoro</strong> <span class="step-note">base fattuale per generare</span></p><ul style="margin:0 0 6px 18px;font-size:12px">';
+  (pack.fatti || []).slice(0, 8).forEach(function (f) { html += '<li>' + esc(f) + '</li>'; });
+  html += '</ul><p style="margin:0">';
+  (pack.fonti || []).slice(0, 4).forEach(function (f) {
+    if (f.url) html += '<a href="' + esc(f.url) + '" target="_blank" rel="noopener" style="font-size:11px;margin-right:10px">↗ ' + esc(f.title || f.url) + '</a>';
+  });
+  html += '</p><div style="margin-top:8px"><button class="btn small primary" data-cs-genctx="' + esc(key) + '">✨ Genera con questo contesto</button></div></div>';
+  return html;
+}
+function refreshCtxPanel(s, key) {
+  var el = document.getElementById('cs-ctx-' + key);
+  if (el) { el.innerHTML = cardCtxHtml(s, key); bindCardStudio(s); }
+}
+function cardModelDefaults(s) {
+  var d = (s.modello && s.modello.schema && s.modello.schema.defaults) || {};
+  return { verbosita: d.verbosita || 'standard', istruzione: d.istruzione || 'secondaria', arricchisci: !!d.arricchisci, verifica: !!d.verifica };
+}
+function cardEnsureCtx(s, key) {
+  // Ritorna promise<boolean>: true se esiste un pack (o appena creato), false se impossibile.
+  if (s.arricchimenti && s.arricchimenti[key] && ((s.arricchimenti[key].fatti || []).length || (s.arricchimenti[key].fonti || []).length)) {
+    return Promise.resolve(true);
+  }
+  return post('/api/cards/' + encodeURIComponent(s.id) + '/enrich/' + encodeURIComponent(key), {}).then(function (r) {
+    s.arricchimenti = s.arricchimenti || {};
+    s.arricchimenti[key] = { chiave: key, fatti: r.fatti || [], fonti: r.fonti || [] };
+    refreshCtxPanel(s, key);
+    return true;
+  }).catch(function (e) { toast('Contesto non disponibile: genero senza (' + (e.message || e) + ')'); return false; });
+}
+function cardAutoVerify(s, key) {
+  // Verifica automatica se il modello la prevede; aggiorna s.verifiche. Mai bloccante.
+  if (!cardModelDefaults(s).verifica) return Promise.resolve();
+  return post('/api/cards/' + encodeURIComponent(s.id) + '/verify', { sezioni: [key] }).then(function (r) {
+    var map = {};
+    (s.verifiche || []).forEach(function (v) { map[v.chiave] = v; });
+    ((r && r.verifiche) || []).forEach(function (v) { map[v.chiave] = v; });
+    s.verifiche = Object.keys(map).map(function (k) { return map[k]; });
+  }).catch(function (e) { toast('Verifica automatica non riuscita: ' + (e.message || e)); });
+}
+function cardGenOne(s, key, forceCtx) {
+  // Una sezione: eventuale arricchimento da default, generazione, eventuale verifica da default.
+  var wantCtx = !!forceCtx || cardModelDefaults(s).arricchisci;
+  var run = function (useCtx) {
+    return post('/api/cards/' + encodeURIComponent(s.id) + '/generate/' + encodeURIComponent(key), useCtx ? { usaContesto: true } : {}).then(function (r) {
+      if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
+      if (r.section) s.timbri[key] = { verbosita: r.section.verbosita || s.verbosita, istruzione: r.section.istruzione || s.istruzione };
+      s.verifiche = (s.verifiche || []).filter(function (v) { return v.chiave !== key; }); // verifica superata: rifalla
+      refreshSecBadge(s, key);
+      return cardAutoVerify(s, key).then(function () { return r; });
+    });
+  };
+  if (!wantCtx) return run(false);
+  return cardEnsureCtx(s, key).then(run);
+}
+function cardGenSection(s, key, btn, useCtx) {
   var old = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
-  post('/api/cards/' + encodeURIComponent(s.id) + '/generate/' + encodeURIComponent(key), {}).then(function (r) {
-    if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
-    if (r.section) s.timbri[key] = { verbosita: r.section.verbosita || s.verbosita, istruzione: r.section.istruzione || s.istruzione };
-    refreshSecBadge(s, key);
+  cardGenOne(s, key, useCtx).then(function (r) {
     if (r.warnings && r.warnings.length) toast('Generata con avvisi: ' + r.warnings.join('; '));
     else toast('Sezione generata', true);
     refreshCardSection(s, key);
+    refreshCtxPanel(s, key);
     if (btn) { btn.disabled = false; btn.innerHTML = old; }
   }).catch(function (e) { toast(e.message); if (btn) { btn.disabled = false; btn.innerHTML = old; } });
 }
@@ -1253,9 +1467,8 @@ function cardGenAll(s, btn, onlyMissing) {
     if (i >= defs.length) { btn.disabled = false; btn.innerHTML = label; toast('Generazione completa: rivedi e salva', true); render(); return; }
     btn.innerHTML = '⚡ Generazione ' + (i + 1) + '/' + defs.length + '…';
     var key = defs[i].key;
-    post('/api/cards/' + encodeURIComponent(s.id) + '/generate/' + encodeURIComponent(key), {}).then(function (r) {
-      if (r.section && r.section.corpo) s.corpi[key] = r.section.corpo;
-      if (r.section) s.timbri[key] = { verbosita: r.section.verbosita || s.verbosita, istruzione: r.section.istruzione || s.istruzione };
+    cardGenOne(s, key, false).then(function (r) {
+      if (r.warnings && r.warnings.length) toast('Sezione ' + key + ': ' + r.warnings.join('; '));
       i += 1;
       step();
     }).catch(function (e) { toast('Sezione ' + key + ': ' + e.message); i += 1; step(); });
@@ -1396,6 +1609,16 @@ function mwStepModelli(w) {
       '<div class="field"><label>Chiave *</label><input data-mw-m="' + mi + ':key" value="' + esc(m.key) + '" placeholder="es. compositore" /></div>' +
       '</div>' +
       '<div class="field"><label>Voce del modello / system prompt (opzionale, eredita il tono)</label><textarea data-mw-m="' + mi + ':systemPrompt" style="min-height:56px" placeholder="es. Voce monografica, 3-5 nuclei...">' + esc(m.systemPrompt || '') + '</textarea></div>' +
+      '<details><summary class="step-note" style="cursor:pointer">🎛 Stile e opzioni (default per le schede)</summary>' +
+      '<div class="meta-grid" style="margin-top:6px">' +
+      '<div class="field"><label>Lunghezza</label><select data-mw-stile="' + mi + ':verbosita">' +
+      [['essenziale', 'Essenziale'], ['standard', 'Standard'], ['approfondita', 'Approfondita']].map(function (o) { return '<option value="' + o[0] + '"' + (((m.stile || {}).verbosita || 'standard') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="field"><label>Rivolto a</label><select data-mw-stile="' + mi + ':istruzione">' +
+      [['primaria', 'Primaria'], ['secondaria', 'Secondaria'], ['universita', 'Università']].map(function (o) { return '<option value="' + o[0] + '"' + (((m.stile || {}).istruzione || 'secondaria') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+      '</select></div></div>' +
+      '<label class="check-item" style="margin:4px 0"><input type="checkbox" data-mw-stile="' + mi + ':arricchisci"' + ((m.stile || {}).arricchisci ? ' checked' : '') + ' /> <span><strong>Arricchisci sempre</strong></span></label>' +
+      '<label class="check-item" style="margin:4px 0"><input type="checkbox" data-mw-stile="' + mi + ':verifica"' + ((m.stile || {}).verifica ? ' checked' : '') + ' /> <span><strong>Verifica sempre</strong></span></label></details>' +
       '<p class="step-note">' + m.sections.length + ' sezioni' + (m.fromTemplate ? ' · da template' : '') + '</p></div>';
   });
   return html + '</div></div>';
@@ -1467,8 +1690,21 @@ function bindMateriaWizard(w) {
   appEl.querySelectorAll('[data-mw-mdel]').forEach(function (b) {
     b.onclick = function () { w.modelli.splice(Number(b.getAttribute('data-mw-mdel')), 1); render(); };
   });
+  appEl.querySelectorAll('[data-mw-stile]').forEach(function (inp) {
+    var parts = inp.getAttribute('data-mw-stile').split(':');
+    var handler = function () {
+      var m = w.modelli[Number(parts[0])];
+      if (!m) return;
+      m.stile = m.stile || { verbosita: 'standard', istruzione: 'secondaria', arricchisci: false, verifica: false };
+      var f = parts[1];
+      if (f === 'arricchisci' || f === 'verifica') m.stile[f] = inp.checked;
+      else m.stile[f] = inp.value;
+    };
+    inp.oninput = handler;
+    inp.onchange = handler;
+  });
   var addB = document.getElementById('mwAddBlank');
-  if (addB) addB.onclick = function () { w.modelli.push({ key: '', nome: '', fromTemplate: '', systemPrompt: '', sections: [] }); render(); };
+  if (addB) addB.onclick = function () { w.modelli.push({ key: '', nome: '', fromTemplate: '', systemPrompt: '', sections: [], stile: { verbosita: 'standard', istruzione: 'secondaria', arricchisci: false, verifica: false } }); render(); };
   var addT = document.getElementById('mwAddTpl');
   if (addT) addT.onclick = function () {
     var sel = document.getElementById('mwTpl');
@@ -1479,7 +1715,7 @@ function bindMateriaWizard(w) {
       var tpl = (r.models || []).find(function (m) { return m.id === tplId; });
       if (!tpl) { toast('Template non trovato'); return; }
       var cloned = JSON.parse(JSON.stringify((tpl.schema && tpl.schema.sections) || []));
-      w.modelli.push({ key: '', nome: '', fromTemplate: tplId, systemPrompt: (tpl.schema && tpl.schema.system_prompt) || '', sections: cloned, _tplSections: JSON.parse(JSON.stringify(cloned)) });
+      w.modelli.push({ key: '', nome: '', fromTemplate: tplId, systemPrompt: (tpl.schema && tpl.schema.system_prompt) || '', sections: cloned, _tplSections: JSON.parse(JSON.stringify(cloned)), stile: { verbosita: 'standard', istruzione: 'secondaria', arricchisci: false, verifica: false } });
       render();
     }).catch(function (e) { toast(e.message); });
   };
@@ -1549,7 +1785,7 @@ function mwSave(w) {
         var chain = Promise.resolve();
         w.modelli.forEach(function (m) {
           chain = chain.then(function () {
-            var body = { materiaId: savedMid, chiave: m.key.trim(), nome: m.nome.trim() };
+            var body = { materiaId: savedMid, chiave: m.key.trim(), nome: m.nome.trim(), defaults: m.stile || { verbosita: 'standard', istruzione: 'secondaria', arricchisci: false, verifica: false } };
             var secs = m.sections.map(secBody);
             var pureClone = m.fromTemplate && m._tplSections && JSON.stringify(secs) === JSON.stringify(m._tplSections.map(secBody));
             if (pureClone) body.fromTemplate = m.fromTemplate;
@@ -1613,9 +1849,11 @@ function talkStartEdit(modelId) {
   api('/api/models?subject=' + encodeURIComponent(matId)).then(function (r) {
     var found = (r.models || []).find(function (m) { return m.id === modelId; });
     if (!found) { toast('Modello non trovato'); state.view = 'home'; refreshList(); return; }
+    var curStile = (found.schema && found.schema.defaults) || { verbosita: 'standard', istruzione: 'secondaria', arricchisci: false, verifica: false };
     talk.edit = {
       modelId: modelId, materiaId: matId, nome: found.nome || '',
       newNome: found.nome || '',
+      stile: { verbosita: curStile.verbosita || 'standard', istruzione: curStile.istruzione || 'secondaria', arricchisci: !!curStile.arricchisci, verifica: !!curStile.verifica }, stileDirty: false,
       sections: JSON.parse(JSON.stringify((found.schema && found.schema.sections) || [])),
       origSections: {},
       want: [], drop: [], added: [], textsDirty: false,
@@ -1638,13 +1876,14 @@ function talkEditSteps(t) {
   if (t.edit.want.indexOf('nome') >= 0) steps.push('e2');
   if (t.edit.want.indexOf('parti') >= 0) steps.push('e3');
   if (t.edit.want.indexOf('testi') >= 0) steps.push('e4');
+  if (t.edit.want.indexOf('stile') >= 0) steps.push('e6');
   steps.push('e5');
   return steps;
 }
 function talkEditDots(t) {
   var steps = talkEditSteps(t);
   return '<div class="talk-prog">' + steps.map(function (n) {
-    var order = ['e1', 'e2', 'e3', 'e4', 'e5'];
+    var order = ['e1', 'e2', 'e3', 'e4', 'e6', 'e5'];
     return '<span class="talk-dot' + (n === t.step ? ' on' : (order.indexOf(n) < order.indexOf(t.step) ? ' done' : '')) + '" title="' + n + '"></span>';
   }).join('') + '</div>';
 }
@@ -1665,7 +1904,8 @@ function talkEditStep(t) {
       (e.nCards ? '<p class="talk-note">Ha ' + e.nCards + (e.nCards === 1 ? ' scheda' : ' schede') + ': le modifiche si applicano subito, i contenuti salvati restano intatti.</p>' : '<p class="talk-note">Nessuna scheda ancora: puoi cambiare tutto liberamente.</p>'));
     html += '<div class="talk-input"><label class="check-item"><input type="checkbox" data-talk-want="nome"' + (e.want.indexOf('nome') >= 0 ? ' checked' : '') + ' /> <span><strong>Rinomina</strong> <small>cambia il nome del modello</small></span></label>' +
       '<label class="check-item"><input type="checkbox" data-talk-want="parti"' + (e.want.indexOf('parti') >= 0 ? ' checked' : '') + ' /> <span><strong>Parti</strong> <small>aggiungi o togli parti della scheda</small></span></label>' +
-      '<label class="check-item"><input type="checkbox" data-talk-want="testi"' + (e.want.indexOf('testi') >= 0 ? ' checked' : '') + ' /> <span><strong>Testi</strong> <small>cambia le istruzioni per l\u2019AI</small></span></label></div>';
+      '<label class="check-item"><input type="checkbox" data-talk-want="testi"' + (e.want.indexOf('testi') >= 0 ? ' checked' : '') + ' /> <span><strong>Testi</strong> <small>cambia le istruzioni per l\u2019AI</small></span></label>' +
+      '<label class="check-item"><input type="checkbox" data-talk-want="stile"' + (e.want.indexOf('stile') >= 0 ? ' checked' : '') + ' /> <span><strong>Stile e opzioni</strong> <small>lunghezza, pubblico, ricerca e verifica di default</small></span></label></div>';
     return html + talkEditNav(t);
   }
   if (t.step === 'e2') {
@@ -1697,6 +1937,19 @@ function talkEditStep(t) {
     });
     return h4 + '</div>' + talkEditNav(t);
   }
+  if (t.step === 'e6') {
+    var h6 = talkBot('<p><strong>Stile della casa</strong>: come si riempiranno le schede di default (la singola scheda potrà derogare).</p>');
+    h6 += '<div class="talk-input"><div class="meta-grid">' +
+      '<div class="field"><label>Lunghezza</label><select id="talkEditVerb">' +
+      [['essenziale', 'Essenziale'], ['standard', 'Standard'], ['approfondita', 'Approfondita']].map(function (o) { return '<option value="' + o[0] + '"' + (e.stile.verbosita === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="field"><label>Rivolto a</label><select id="talkEditIstr">' +
+      [['primaria', 'Primaria'], ['secondaria', 'Secondaria'], ['universita', 'Università']].map(function (o) { return '<option value="' + o[0] + '"' + (e.stile.istruzione === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+      '</select></div></div>' +
+      '<label class="check-item" style="margin:4px 0"><input type="checkbox" id="talkEditArr"' + (e.stile.arricchisci ? ' checked' : '') + ' /> <span><strong>Arricchisci sempre</strong> <small>cerca fatti sul web prima di generare</small></span></label>' +
+      '<label class="check-item" style="margin:4px 0"><input type="checkbox" id="talkEditVer"' + (e.stile.verifica ? ' checked' : '') + ' /> <span><strong>Verifica sempre</strong> <small>controlla i fatti dopo aver generato</small></span></label></div>';
+    return h6 + talkEditNav(t);
+  }
   // e5 review
   var changes = [];
   if (e.want.indexOf('nome') >= 0 && e.newNome.trim() && e.newNome.trim() !== e.nome) changes.push('Rinomina in «' + e.newNome.trim() + '»');
@@ -1707,6 +1960,7 @@ function talkEditStep(t) {
     if (!e.drop.length && !e.added.length) changes.push('Parti: nessuna modifica');
   }
   if (e.want.indexOf('testi') >= 0) changes.push('Testi: ' + (e.textsDirty ? 'modificati' : 'invariati'));
+  if (e.want.indexOf('stile') >= 0) changes.push('Stile: ' + e.stile.verbosita + '/' + e.stile.istruzione + (e.stile.arricchisci ? ', arricchisci' : '') + (e.stile.verifica ? ', verifica' : ''));
   if (!changes.length) changes.push('Nessuna modifica.');
   var h5 = talkBot('<p><strong>Ricapitolando</strong> per «' + esc(e.nome) + '»:</p><p>' + changes.map(esc).join('<br />') + '</p>' +
     (e.nCards ? '<p class="talk-note">Verranno aggiornate ' + e.nCards + (e.nCards === 1 ? ' scheda' : ' schede') + ' esistenti (i contenuti salvati restano).</p>' : '') + '<p>Salvo?</p>');
@@ -1719,6 +1973,9 @@ function talkSaveEdit(t) {
   var chain = Promise.resolve();
   if (e.want.indexOf('nome') >= 0 && e.newNome.trim() && e.newNome.trim() !== e.nome) {
     chain = chain.then(function () { return patch('/api/models/' + encodeURIComponent(e.modelId), { nome: e.newNome.trim() }); });
+  }
+  if (e.want.indexOf('stile') >= 0 && e.stileDirty) {
+    chain = chain.then(function () { return patch('/api/models/' + encodeURIComponent(e.modelId), { defaults: e.stile }); });
   }
   if (e.want.indexOf('parti') >= 0) {
     e.drop.forEach(function (key) {
@@ -1877,6 +2134,16 @@ function talkStep3(t) {
         html += '<p class="talk-note">Copio la struttura di “' + esc(cur.nome) + '”' + (cur.materiaNome ? ' (' + esc(cur.materiaNome) + ')' : '') + '.</p>';
       }
     }
+    html += '<details style="margin-top:8px"><summary class="talk-note" style="cursor:pointer">🎛 Stile e opzioni (come si riempirà di default)</summary>' +
+      '<div class="meta-grid" style="margin-top:6px">' +
+      '<div class="field"><label>Lunghezza</label><select data-talk-stile="' + i + ':verbosita">' +
+      [['essenziale', 'Essenziale'], ['standard', 'Standard'], ['approfondita', 'Approfondita']].map(function (o) { return '<option value="' + o[0] + '"' + (sc.stile.verbosita === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="field"><label>Rivolto a</label><select data-talk-stile="' + i + ':istruzione">' +
+      [['primaria', 'Primaria'], ['secondaria', 'Secondaria'], ['universita', 'Università']].map(function (o) { return '<option value="' + o[0] + '"' + (sc.stile.istruzione === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+      '</select></div></div>' +
+      '<label class="check-item" style="margin:4px 0"><input type="checkbox" data-talk-stile="' + i + ':arricchisci"' + (sc.stile.arricchisci ? ' checked' : '') + ' /> <span><strong>Arricchisci sempre</strong> <small>cerca fatti sul web prima di generare</small></span></label>' +
+      '<label class="check-item" style="margin:4px 0"><input type="checkbox" data-talk-stile="' + i + ':verifica"' + (sc.stile.verifica ? ' checked' : '') + ' /> <span><strong>Verifica sempre</strong> <small>controlla i fatti dopo aver generato</small></span></label></details>';
     html += '</div>';
   });
   html += talkNav(t);
@@ -1972,7 +2239,7 @@ function talkGotoStep3(t) {
   t.scelte = t.picked.map(function (k) {
     var a = talkArch(k);
     var s = talkSuggest(a);
-    return { arch: k, nome: a.nomeSug, tplMain: s.main, tplAltri: s.altri, mode: s.main ? 'main' : 'scratch', tplId: s.main ? s.main.id : '', sections: [], drop: [], adapted: null, useAdapted: true, showOrig: false, voice: '', voiceFromLLM: false };
+    return { arch: k, nome: a.nomeSug, tplMain: s.main, tplAltri: s.altri, mode: s.main ? 'main' : 'scratch', tplId: s.main ? s.main.id : '', sections: [], drop: [], adapted: null, useAdapted: true, showOrig: false, voice: '', voiceFromLLM: false, stile: { verbosita: 'standard', istruzione: 'secondaria', arricchisci: false, verifica: false }, stileTouched: false };
   });
   t.loading = true;
   render();
@@ -2108,7 +2375,7 @@ function talkSave(t) {
       t.scelte.forEach(function (sc) {
         seq = seq.then(function () {
           var chiave = talkUniqueChiave(mwSlug(sc.nome), taken);
-          var body = { materiaId: mid, chiave: chiave, nome: sc.nome.trim() };
+          var body = { materiaId: mid, chiave: chiave, nome: sc.nome.trim(), defaults: sc.stile };
           if (sc.mode === 'scratch' || !sc.sections.length) {
             body.sections = [{ key: 'introduzione', title: 'Introduzione', type: 'text', required: true }];
           } else {
@@ -2184,6 +2451,14 @@ function bindTalkEdit(t) {
   });
   var nome = document.getElementById('talkEditNome');
   if (nome) nome.oninput = function () { e.newNome = nome.value; };
+  var evb = document.getElementById('talkEditVerb');
+  if (evb) evb.onchange = function () { e.stile.verbosita = evb.value; e.stileDirty = true; };
+  var eis = document.getElementById('talkEditIstr');
+  if (eis) eis.onchange = function () { e.stile.istruzione = eis.value; e.stileDirty = true; };
+  var ear = document.getElementById('talkEditArr');
+  if (ear) ear.onchange = function () { e.stile.arricchisci = ear.checked; e.stileDirty = true; };
+  var eve = document.getElementById('talkEditVer');
+  if (eve) eve.onchange = function () { e.stile.verifica = eve.checked; e.stileDirty = true; };
   appEl.querySelectorAll('[data-talk-edrop]').forEach(function (box) {
     box.onchange = function () {
       var k = box.getAttribute('data-talk-edrop');
@@ -2326,6 +2601,26 @@ function bindTalk(t) {
   });
   appEl.querySelectorAll('[data-talk-nome]').forEach(function (inp) {
     inp.oninput = function () { t.scelte[Number(inp.getAttribute('data-talk-nome'))].nome = inp.value; };
+  });
+  appEl.querySelectorAll('[data-talk-stile]').forEach(function (inp) {
+    var parts = inp.getAttribute('data-talk-stile').split(':');
+    var handler = function () {
+      var sc = t.scelte[Number(parts[0])];
+      if (!sc) return;
+      var f = parts[1];
+      if (f === 'arricchisci' || f === 'verifica') { sc.stile[f] = inp.checked; sc.stileTouched = true; }
+      else {
+        sc.stile[f] = inp.value;
+        // Scelta intelligente: a livello università propone ricerca+verifica (modificabile).
+        if (f === 'istruzione' && inp.value === 'universita' && !sc.stileTouched) {
+          sc.stile.arricchisci = true;
+          sc.stile.verifica = true;
+          render();
+        }
+      }
+    };
+    inp.oninput = handler;
+    inp.onchange = handler;
   });
   appEl.querySelectorAll('[data-talk-tplmode]').forEach(function (b) {
     b.onclick = function () {

@@ -50,8 +50,8 @@ export function effectiveConfig(env = process.env) {
   return {
     apiKeyConfigured: Boolean((env.OPENROUTER_API_KEY || '').trim()),
     endpoint: env.OPENROUTER_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions',
-    visionModel: env.OPENROUTER_VISION_MODEL || 'meta/muse-spark-1.3',
-    textModel: env.OPENROUTER_TEXT_MODEL || 'meta/muse-spark-1.3',
+    visionModel: env.OPENROUTER_VISION_MODEL || 'meta/muse-spark-1.3-contributor',
+    textModel: env.OPENROUTER_TEXT_MODEL || 'meta/muse-spark-1.3-contributor',
     webSearch: String(env.OPENROUTER_WEB_SEARCH || 'false').trim().toLowerCase() === 'true',
     host: env.APP_HOST || '127.0.0.1',
     viewerPort: Number(env.APP_PORT || DEFAULTS.viewerPort),

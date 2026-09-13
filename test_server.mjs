@@ -426,6 +426,15 @@ test('callModel extracts url_citation annotations from the message', async () =>
   if (previous === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = previous;
 });
 
+test('callModel extracts Sonar-format citations (message + choice level, dedup)', async () => {
+  const previous = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'test-key';
+  const fakeFetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ciao', citations: ['https://a.org', { url: 'https://b.org' }, 'https://a.org'] }, citations: [{ url: 'https://c.org' }] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const result = await callModel(TEXT_MODEL, [{ type: 'text', text: 'ciao' }], 'test-key', fakeFetch);
+  assert.deepEqual(result.citations, [{ title: '', url: 'https://a.org' }, { title: '', url: 'https://b.org' }, { title: '', url: 'https://c.org' }]);
+  if (previous === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = previous;
+});
+
 // ---------------------------------------------------------------------------
 // Esportazione PDF "libro d'arte" (make_pdf.py + rotte /pdf)
 // ---------------------------------------------------------------------------

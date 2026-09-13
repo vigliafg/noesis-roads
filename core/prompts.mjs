@@ -10,11 +10,12 @@ import { MATERIE } from './models.mjs';
 const COMMON_RULES = [
   'Italiano chiaro e didattico.',
   'Solo fatti ragionevolmente certi, mai inventare opere/date/citazioni.',
+  'Se la critica è divisa su un punto, dillo esplicitamente invece di presentare una sola posizione come certa.',
   'Rispondi SOLO con JSON valido nella forma dello schema della sezione.',
 ].join(' ');
 
 // Versione del contratto (hint+regole): invalida le prompt_version quando cambia.
-export const TYPE_CONTRACT_VERSION = 1;
+export const TYPE_CONTRACT_VERSION = 2;
 
 // Livelli di generazione per scheda (scelti in testata, timbrati per sezione).
 export const VERBOSITA = ['essenziale', 'standard', 'approfondita'];

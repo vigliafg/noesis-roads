@@ -35,8 +35,9 @@ function loadLocalEnv() {
 loadLocalEnv();
 
 export const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions';
-export const VISION_MODEL = process.env.OPENROUTER_VISION_MODEL || 'meta/muse-spark-1.3';
-export const TEXT_MODEL = process.env.OPENROUTER_TEXT_MODEL || 'meta/muse-spark-1.3';
+export const VISION_MODEL = process.env.OPENROUTER_VISION_MODEL || 'meta/muse-spark-1.3-contributor';
+export const TEXT_MODEL = process.env.OPENROUTER_TEXT_MODEL || 'meta/muse-spark-1.3-contributor';
+export const VERIFY_MODEL = process.env.OPENROUTER_VERIFY_MODEL || 'perplexity/sonar';
 export function webSearchEnabled(env = process.env) { return env.OPENROUTER_WEB_SEARCH?.trim().toLowerCase() === 'true'; }
 const PORT = Number(process.env.APP_PORT || 18000);
 const HOST = process.env.APP_HOST || '127.0.0.1';
@@ -390,6 +391,14 @@ export async function callModel(model, content, apiKey, fetchImpl = globalThis.f
   const text = Array.isArray(message?.content) ? message.content.map(part => part.text || '').join('\n') : message?.content;
   const annotations = Array.isArray(message?.annotations) ? message.annotations : [];
   const citations = annotations.filter(a => a && a.type === 'url_citation' && a.url_citation && a.url_citation.url).map(a => ({ title: a.url_citation.title || '', url: a.url_citation.url }));
+  // Formato Sonar/Perplexity: array di URL in message.citations o a livello choice.
+  const sonarLists = [message?.citations, payload?.choices?.[0]?.citations].filter(Array.isArray);
+  for (const list of sonarLists) {
+    for (const u of list) {
+      const url = typeof u === 'string' ? u : (u && u.url);
+      if (url && !citations.some((c) => c.url === url)) citations.push({ title: '', url });
+    }
+  }
   return { data: cleanModelJson(text), citations };
 }
 
@@ -534,6 +543,10 @@ function dbSchedaPayload(id) {
     istruzione: full.istruzione,
     modello,
     sezioni,
+    verifiche: (full.verifiche || []).map((v) => {
+      const acc = new Set(v.accettati || []);
+      return { chiave: v.chiave, dubbi: (v.esiti || []).filter((e) => e.esito !== 'confermata' && !acc.has(e.affermazione)).length, fonti: (v.fonti || []).slice(0, 6), updatedAt: v.updatedAt };
+    }),
     immagini: (full.immagini || []).map((m) => ({ ...m, url: '/api/cards/' + full.id + '/images/' + m.id }))
   };
 }

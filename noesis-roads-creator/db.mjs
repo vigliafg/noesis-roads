@@ -270,6 +270,25 @@ export function initSchema() {
       mime TEXT NOT NULL DEFAULT 'image/jpeg',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS verifiche (
+      scheda_id TEXT NOT NULL REFERENCES schede_lezione(id) ON DELETE CASCADE,
+      chiave TEXT NOT NULL,
+      esito_json TEXT NOT NULL DEFAULT '[]',
+      fonti_json TEXT NOT NULL DEFAULT '[]',
+      accettati_json TEXT NOT NULL DEFAULT '[]',
+      model TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (scheda_id, chiave)
+    );
+    CREATE TABLE IF NOT EXISTS arricchimenti (
+      scheda_id TEXT NOT NULL REFERENCES schede_lezione(id) ON DELETE CASCADE,
+      chiave TEXT NOT NULL,
+      fatti_json TEXT NOT NULL DEFAULT '[]',
+      fonti_json TEXT NOT NULL DEFAULT '[]',
+      model TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (scheda_id, chiave)
+    );
     CREATE INDEX IF NOT EXISTS idx_modelli_materia ON modelli_scheda(materia_id);
     CREATE INDEX IF NOT EXISTS idx_schede_modello ON schede_lezione(modello_id);
     CREATE INDEX IF NOT EXISTS idx_sezioni_scheda ON sezioni(scheda_id);
@@ -298,6 +317,8 @@ export function initSchema() {
   if (!zcols.includes('prompt_version')) db.exec("ALTER TABLE sezioni ADD COLUMN prompt_version TEXT NOT NULL DEFAULT ''");
   if (!zcols.includes('verbosita')) db.exec("ALTER TABLE sezioni ADD COLUMN verbosita TEXT NOT NULL DEFAULT ''");
   if (!zcols.includes('istruzione')) db.exec("ALTER TABLE sezioni ADD COLUMN istruzione TEXT NOT NULL DEFAULT ''");
+  const vcols = getDb().prepare('PRAGMA table_info(verifiche)').all().map(c => c.name);
+  if (!vcols.includes('accettati_json')) db.exec("ALTER TABLE verifiche ADD COLUMN accettati_json TEXT NOT NULL DEFAULT '[]'");
 
   // migrazione: livelli di generazione per scheda (default = comportamento attuale)
   const lcols = getDb().prepare('PRAGMA table_info(schede_lezione)').all().map(c => c.name);
@@ -1135,6 +1156,59 @@ export function deleteImmagine(immagineId) {
   getDb().prepare('DELETE FROM immagini WHERE id = ?').run(immagineId);
 }
 
+function rowToVerifica(row) {
+  if (!row) return null;
+  let esiti = [], fonti = [], accettati = [];
+  try { esiti = JSON.parse(row.esito_json || '[]'); } catch { esiti = []; }
+  try { fonti = JSON.parse(row.fonti_json || '[]'); } catch { fonti = []; }
+  try { accettati = JSON.parse(row.accettati_json || '[]'); } catch { accettati = []; }
+  return { schedaId: row.scheda_id, chiave: row.chiave, esiti, fonti, accettati, model: row.model || '', updatedAt: row.updated_at };
+}
+export function saveVerifica(schedaId, chiave, { esiti = [], fonti = [], model = '', accettati = null } = {}) {
+  if (!getScheda(schedaId)) throw new Error(`scheda sconosciuta: ${schedaId}`);
+  const prev = getVerifica(schedaId, chiave);
+  const keep = accettati === null ? (prev ? prev.accettati : []) : accettati;
+  // L'accettazione vale per il testo esatto: decade se l'affermazione cambia/sparisce.
+  const texts = new Set(esiti.map((e) => e.affermazione));
+  const valid = keep.filter((a) => texts.has(a));
+  getDb().prepare(`INSERT INTO verifiche (scheda_id, chiave, esito_json, fonti_json, accettati_json, model, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(scheda_id, chiave) DO UPDATE SET esito_json=excluded.esito_json, fonti_json=excluded.fonti_json, accettati_json=excluded.accettati_json, model=excluded.model, updated_at=excluded.updated_at`)
+    .run(schedaId, chiave, JSON.stringify(esiti), JSON.stringify(fonti), JSON.stringify(valid), String(model || ''), now());
+  return getVerifica(schedaId, chiave);
+}
+export function getVerifica(schedaId, chiave, conn) {
+  const row = (conn || getDb()).prepare('SELECT * FROM verifiche WHERE scheda_id = ? AND chiave = ?').get(schedaId, chiave);
+  return rowToVerifica(row);
+}
+export function listVerifiche(schedaId, conn) {
+  return (conn || getDb()).prepare('SELECT * FROM verifiche WHERE scheda_id = ? ORDER BY chiave').all(schedaId).map(rowToVerifica);
+}
+export function clearVerifica(schedaId, chiave) {
+  getDb().prepare('DELETE FROM verifiche WHERE scheda_id = ? AND chiave = ?').run(schedaId, chiave);
+}
+
+function rowToArricchimento(row) {
+  if (!row) return null;
+  let fatti = [], fonti = [];
+  try { fatti = JSON.parse(row.fatti_json || '[]'); } catch { fatti = []; }
+  try { fonti = JSON.parse(row.fonti_json || '[]'); } catch { fonti = []; }
+  return { schedaId: row.scheda_id, chiave: row.chiave, fatti, fonti, model: row.model || '', updatedAt: row.updated_at };
+}
+export function saveArricchimento(schedaId, chiave, { fatti = [], fonti = [], model = '' } = {}) {
+  if (!getScheda(schedaId)) throw new Error(`scheda sconosciuta: ${schedaId}`);
+  getDb().prepare(`INSERT INTO arricchimenti (scheda_id, chiave, fatti_json, fonti_json, model, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(scheda_id, chiave) DO UPDATE SET fatti_json=excluded.fatti_json, fonti_json=excluded.fonti_json, model=excluded.model, updated_at=excluded.updated_at`)
+    .run(schedaId, chiave, JSON.stringify(fatti), JSON.stringify(fonti), String(model || ''), now());
+  return getArricchimento(schedaId, chiave);
+}
+export function getArricchimento(schedaId, chiave, conn) {
+  const row = (conn || getDb()).prepare('SELECT * FROM arricchimenti WHERE scheda_id = ? AND chiave = ?').get(schedaId, chiave);
+  return rowToArricchimento(row);
+}
+export function listArricchimenti(schedaId, conn) {
+  return (conn || getDb()).prepare('SELECT * FROM arricchimenti WHERE scheda_id = ? ORDER BY chiave').all(schedaId).map(rowToArricchimento);
+}
+
 export function getSchedaFull(id, conn) {
   const db = conn || getDb();
   const scheda = rowToScheda(db.prepare('SELECT * FROM schede_lezione WHERE id = ?').get(id));
@@ -1142,7 +1216,9 @@ export function getSchedaFull(id, conn) {
   const modello = rowToModello(db.prepare('SELECT * FROM modelli_scheda WHERE id = ?').get(scheda.modelloId));
   const sezioni = db.prepare('SELECT * FROM sezioni WHERE scheda_id = ? ORDER BY ordine, chiave').all(id).map(rowToSezione);
   const immaginiMeta = db.prepare('SELECT id, ruolo, mime, length(dati) AS bytes FROM immagini WHERE scheda_id = ? ORDER BY id').all(id);
-  return { ...scheda, modello, sezioni, immagini: immaginiMeta };
+  const verifiche = db.prepare('SELECT * FROM verifiche WHERE scheda_id = ? ORDER BY chiave').all(id).map(rowToVerifica);
+  const arricchimenti = db.prepare('SELECT * FROM arricchimenti WHERE scheda_id = ? ORDER BY chiave').all(id).map(rowToArricchimento);
+  return { ...scheda, modello, sezioni, immagini: immaginiMeta, verifiche, arricchimenti };
 }
 
 // ---------------------------------------------------------------------------

@@ -769,6 +769,27 @@ test('API wizard: materie/modelli/sezioni/fork + sezioniAttive + preview', async
     r = await asJson('DELETE', '/api/models/' + encodeURIComponent(r.body.model.id));
     assert.equal(r.status, 200); // senza schede: si elimina
 
+    // --- defaults modello → eredità scheda ---
+    r = await asJson('POST', '/api/models', { materiaId: 'filosofia', chiave: 'stiled', nome: 'Stile D', sections: [{ key: 'a', title: 'A', type: 'text' }], defaults: { verbosita: 'approfondita', istruzione: 'universita', arricchisci: true, verifica: true } });
+    assert.equal(r.status, 201);
+    assert.deepEqual(r.body.model.schema.defaults, { verbosita: 'approfondita', istruzione: 'universita', arricchisci: true, verifica: true });
+    r = await asJson('POST', '/api/models', { materiaId: 'filosofia', chiave: 'stiled2', nome: 'Stile D2', sections: [{ key: 'a', title: 'A', type: 'text' }], defaults: { verbosita: 'enorme' } });
+    assert.equal(r.status, 400); // defaults invalidi
+    r = await asJson('PATCH', '/api/models/filosofia:stiled', { defaults: { verbosita: 'essenziale' } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.model.schema.defaults.verbosita, 'essenziale');
+    assert.equal(r.body.model.schema.defaults.istruzione, 'universita'); // resto preservato
+    r = await asJson('POST', '/api/cards', { modelloId: 'filosofia:stiled', titolo: 'Eredita' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.card.verbosita, 'essenziale'); // ereditato (patchato sopra)
+    assert.equal(r.body.card.istruzione, 'universita'); // ereditato
+    r = await asJson('POST', '/api/cards', { modelloId: 'filosofia:stiled', titolo: 'Override', verbosita: 'standard' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.card.verbosita, 'standard'); // esplicito vince
+    assert.equal(r.body.card.istruzione, 'universita');
+    r = await asJson('DELETE', '/api/cards/' + encodeURIComponent(r.body.card.id));
+    assert.equal(r.status, 200);
+
     // --- sezioniAttive sulle cards ---
     r = await asJson('POST', '/api/cards', { id: 'mw-sub', modelloId: 'filosofia:autore-pensiero', titolo: 'Sub', sezioniAttive: ['vita'] });
     assert.equal(r.status, 400); // required escluse
