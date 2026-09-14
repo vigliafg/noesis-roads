@@ -289,6 +289,14 @@ export function initSchema() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (scheda_id, chiave)
     );
+    CREATE TABLE IF NOT EXISTS handbook_capitoli (
+      scheda_id TEXT NOT NULL REFERENCES schede_lezione(id) ON DELETE CASCADE,
+      livello TEXT NOT NULL,
+      markdown TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (scheda_id, livello)
+    );
     CREATE INDEX IF NOT EXISTS idx_modelli_materia ON modelli_scheda(materia_id);
     CREATE INDEX IF NOT EXISTS idx_schede_modello ON schede_lezione(modello_id);
     CREATE INDEX IF NOT EXISTS idx_sezioni_scheda ON sezioni(scheda_id);
@@ -1207,6 +1215,34 @@ export function getArricchimento(schedaId, chiave, conn) {
 }
 export function listArricchimenti(schedaId, conn) {
   return (conn || getDb()).prepare('SELECT * FROM arricchimenti WHERE scheda_id = ? ORDER BY chiave').all(schedaId).map(rowToArricchimento);
+}
+
+function rowToHandbook(row) {
+  if (!row) return null;
+  return { schedaId: row.scheda_id, livello: row.livello, markdown: row.markdown || '', model: row.model || '', updatedAt: row.updated_at };
+}
+export function saveHandbook(schedaId, livello, { markdown = '', model = '' } = {}) {
+  if (!getScheda(schedaId)) throw new Error(`scheda sconosciuta: ${schedaId}`);
+  if (!String(markdown || '').trim()) throw new Error('capitolo vuoto: niente da memorizzare');
+  getDb().prepare(`INSERT INTO handbook_capitoli (scheda_id, livello, markdown, model, updated_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(scheda_id, livello) DO UPDATE SET markdown=excluded.markdown, model=excluded.model, updated_at=excluded.updated_at`)
+    .run(schedaId, String(livello), String(markdown), String(model || ''), now());
+  return getHandbook(schedaId, livello);
+}
+export function getHandbook(schedaId, livello, conn) {
+  const row = (conn || getDb()).prepare('SELECT * FROM handbook_capitoli WHERE scheda_id = ? AND livello = ?').get(schedaId, String(livello));
+  return rowToHandbook(row);
+}
+export function listHandbook(schedaId, conn) {
+  return (conn || getDb()).prepare("SELECT scheda_id, livello, length(markdown) AS chars, model, updated_at FROM handbook_capitoli WHERE scheda_id = ? ORDER BY livello").all(schedaId);
+}
+// Lettura handbook per il viewer (read-only): mai scritture dal viewer.
+export function getHandbookRO(schedaId, livello) {
+  const conn = openReadonly();
+  try {
+    const row = conn.prepare('SELECT * FROM handbook_capitoli WHERE scheda_id = ? AND livello = ?').get(schedaId, String(livello));
+    return rowToHandbook(row);
+  } finally { conn.close(); }
 }
 
 export function getSchedaFull(id, conn) {

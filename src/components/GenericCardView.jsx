@@ -3,6 +3,37 @@
 // nell'ordine del modello, ciascuna via SectionBlock per tipo-sezione.
 // Le viste custom arte restano come renderer d'esempio.
 
+// Handbook: prova GET (capitolo memorizzato), altrimenti POST genera on-demand.
+// Il viewer non memorizza (read-only): il POST restituisce il markdown diretto.
+function downloadHandbook(cardId, livello, el) {
+  var base = '/api/cards/' + encodeURIComponent(cardId) + '/handbook.' + livello;
+  var done = function (text, label) {
+    var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'handbook-' + livello + '.md';
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    if (el) el.textContent = label;
+  };
+  if (el) el.textContent = '⏳…';
+  fetch(base).then(function (r) {
+    if (r.ok) return r.text().then(function (t) { done(t, '✓ Scaricato'); });
+    return fetch(base, { method: 'POST' }).then(function (rp) {
+      if (!rp.ok) throw new Error('HTTP ' + rp.status);
+      return rp.json().then(function (d) {
+        var md = d && d.capitolo && d.capitolo.markdown;
+        if (md) return done(md, '✓ Generato');
+        // Creator: memorizzato, riscarica via GET.
+        return fetch(base).then(function (rg) {
+          if (!rg.ok) throw new Error('HTTP ' + rg.status);
+          return rg.text().then(function (t) { done(t, '✓ Generato'); });
+        });
+      });
+    });
+  }).catch(function () { if (el) el.textContent = '✗ Riprova'; });
+}
+
 function GenericCardView({ card, onBack }) {
   const [fontScale, setFontScale] = React.useState(1);
   const schema = (card.modello && card.modello.schema) || {};
@@ -41,9 +72,13 @@ function GenericCardView({ card, onBack }) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <details style={{ position: 'relative' }}>
             <summary className="back-button" style={{ cursor: 'pointer', listStyle: 'none' }}>⬇ Esporta</summary>
-            <div style={{ position: 'absolute', right: 0, top: '110%', background: '#fffdf9', border: '1px solid #dedbd3', borderRadius: 8, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, zIndex: 50, minWidth: 130 }}>
+            <div style={{ position: 'absolute', right: 0, top: '110%', background: '#fffdf9', border: '1px solid #dedbd3', borderRadius: 8, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, zIndex: 50, minWidth: 170 }}>
               {[['pdf', 'PDF'], ['export.md', 'Markdown'], ['export.json', 'JSON'], ['export.html', 'HTML'], ['export.slides', 'Slide HTML'], ['export.epub', 'EPUB'], ['export.docx', 'Word'], ['export.pptx', 'Slide PPTX']].map(function ([sfx, label]) {
                 return <a key={sfx} href={'/api/cards/' + encodeURIComponent(card.id) + '/' + sfx}>{label}</a>;
+              })}
+              <span style={{ borderTop: '1px solid #dedbd3', margin: '4px 0 2px', fontSize: 11, color: '#6b7a83' }}>📖 Handbook</span>
+              {[['superiori', 'Capitolo superiori'], ['medie', 'Capitolo medie'], ['elementari', 'Capitolo elementari']].map(function ([liv, label]) {
+                return <a key={liv} href="#" onClick={function (e) { e.preventDefault(); downloadHandbook(card.id, liv, e.currentTarget); }}>{label}</a>;
               })}
             </div>
           </details>

@@ -25,7 +25,7 @@ import {
   upsertModello, updateModello, deleteModello, modelHasCards, seedCore, createScheda, getScheda, getSchedaFull, getVerifica,
   listSchede, updateScheda, deleteScheda, saveSezione, getSezione, approveScheda,
   addImmagine, listImmagini, getImmagine, deleteImmagine, saveVerifica, listVerifiche, clearVerifica,
-  saveArricchimento, getArricchimento
+  saveArricchimento, getArricchimento, saveHandbook, getHandbook, listHandbook
 } from './db.mjs';
 import { callModel, VISION_MODEL, TEXT_MODEL, VERIFY_MODEL, getOpenRouterApiKey,
   buildVisionPrompt, buildOverviewPrompt, buildTextPrompt, buildSimilarPrompt,
@@ -872,8 +872,15 @@ function handleApi(req, res, urlPath) {
       sezioni: full.sezioni,
       verifiche: full.verifiche || [],
       arricchimenti: full.arricchimenti || [],
+      handbook: handbookStatus(full),
       immagini: (full.immagini || []).map((m) => ({ ...m, url: '/api/cards/' + id + '/images/' + m.id }))
     };
+  }
+
+  // Capitoli handbook memorizzati + flag "datato" (sezioni cambiate dopo la generazione).
+  function handbookStatus(full) {
+    const sezMax = (full.sezioni || []).map((s) => String(s.updatedAt || '')).sort().pop() || '';
+    return listHandbook(full.id).map((h) => ({ ...h, datato: Boolean(sezMax && h.updated_at && sezMax > h.updated_at) }));
   }
 
   // GET /api/materie — materie disponibili
@@ -1574,6 +1581,43 @@ function handleApi(req, res, urlPath) {
     }).catch((e) => err(res, 500, e.message));
   }
 
+  // GET /api/cards/:id/handbook/:livello — scarica il capitolo memorizzato (.md).
+  // 404 se non ancora generato: crealo con POST.
+  if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'handbook') {
+    const livello = normHandbookLevel(parts[4]);
+    if (!isHandbookLevel(livello)) return err(res, 400, 'Livello handbook non valido (superiori|medie|elementari)');
+    const scheda = getScheda(parts[2]);
+    if (!scheda) return err(res, 404, 'Scheda non trovata');
+    const cap = getHandbook(parts[2], livello);
+    if (!cap || !String(cap.markdown || '').trim()) return err(res, 404, 'Capitolo non ancora generato: usa POST per crearlo');
+    return sendBlob(res, Buffer.from(cap.markdown, 'utf8'), 'text/markdown; charset=utf-8',
+      slugify(scheda.titolo || 'scheda') + '-handbook-' + livello + '.md');
+  }
+
+  // POST /api/cards/:id/handbook/:livello — genera il capitolo via LLM e lo memorizza.
+  // Sorgente: markdown della scheda (export-model); sovrascrive il capitolo esistente.
+  if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'handbook') {
+    const livello = normHandbookLevel(parts[4]);
+    if (!isHandbookLevel(livello)) return err(res, 400, 'Livello handbook non valido (superiori|medie|elementari)');
+    const scheda = getScheda(parts[2]);
+    if (!scheda) return err(res, 404, 'Scheda non trovata');
+    return readBody(req).then(async () => {
+      const apiKey = getOpenRouterApiKey();
+      if (!apiKey) return err(res, 503, 'OPENROUTER_API_KEY non configurata');
+      const full = getSchedaFull(parts[2]);
+      if (!(full.sezioni || []).length) return err(res, 400, 'Genera e salva prima i contenuti: il capitolo parte dalla scheda completa.');
+      const prompt = buildHandbookPrompts({ livello, titolo: full.titolo, markdown: toMarkdown(buildExportModel(full)) });
+      let raw;
+      try {
+        raw = await callModel(TEXT_MODEL, [{ type: 'text', text: prompt.user }], apiKey, globalThis.fetch, { system: prompt.system, maxTokens: prompt.maxTokens });
+      } catch (e) { return err(res, 502, 'Generazione capitolo non riuscita (' + (e.message || e) + ')'); }
+      const text = String((raw && raw.data && (raw.data.observation || raw.data.text)) || '').trim();
+      if (!text) return err(res, 502, 'Generazione capitolo non riuscita: risposta inutilizzabile');
+      const saved = saveHandbook(parts[2], livello, { markdown: text, model: TEXT_MODEL });
+      return json(res, 200, { capitolo: { livello, chars: text.length, model: saved.model, updatedAt: saved.updatedAt } });
+    }).catch((e) => err(res, 500, e.message));
+  }
+
   // GET /api/prompts/preview?modello=<id>&sezione=<key>[&titolo=][&livello=][&verbosita=][&istruzione=]
   if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'prompts' && parts[2] === 'preview') {
     const q = new URL(req.url, 'http://localhost').searchParams;
@@ -1841,6 +1885,7 @@ import {
 } from './pdf-payloads.mjs';
 import { buildExportModel } from './export-model.mjs';
 import { toMarkdown, toJson, toHtml, toSlidesHtml, toEpub } from './export-formats.mjs';
+import { buildHandbookPrompts, isHandbookLevel, normHandbookLevel } from './handbook.mjs';
 
 async function renderPdf(payload) {
   const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);

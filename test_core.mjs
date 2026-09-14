@@ -1123,3 +1123,100 @@ test('API livelli: validazione, PATCH, preview, stale-gate', async () => {
     await rmDir6(dir, { recursive: true, force: true });
   }
 });
+
+test('handbook-chapter: genera e memorizza, scarica, livelli invalidi', async () => {
+  const { mkdtemp: mkd7, rm: rmDir7 } = await import('node:fs/promises');
+  const { tmpdir: tmpDir7 } = await import('node:os');
+  const { join: joinPath7 } = await import('node:path');
+  const { fork: forkProc7 } = await import('node:child_process');
+  const { writeFile: writeTmp7 } = await import('node:fs/promises');
+  const { createServer: httpServer7 } = await import('node:http');
+  const dir = await mkd7(joinPath7(tmpDir7(), 'noesis-hb-'));
+  const dbPath = joinPath7(dir, 'h.db');
+  const previousDb = process.env.NOESIS_CREATOR_DB;
+  process.env.NOESIS_CREATOR_DB = dbPath;
+  let child, stub;
+  try {
+    // Stub OpenRouter: restituisce markdown puro (non JSON).
+    stub = httpServer7((req, res) => {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        const payload = { choices: [{ message: { content: '# Kant per tutti\n\nTesto capitolo medie.', annotations: [] } }] };
+        const data = Buffer.from(JSON.stringify(payload));
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': data.length });
+        res.end(data);
+      });
+    });
+    await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+    const stubUrl = 'http://127.0.0.1:' + stub.address().port + '/chat/completions';
+    const serverAbs = joinPath7(process.cwd(), 'noesis-roads-creator', 'server.mjs');
+    const tmpScript = joinPath7(dir, 'spawn.mjs');
+    await writeTmp7(tmpScript, [
+      `import { createCreatorServer } from 'file://${serverAbs}';`,
+      'const s = createCreatorServer();',
+      's.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port) + "\\n"); });',
+    ].join('\n'));
+    child = forkProc7(tmpScript, [], {
+      env: { ...process.env, NOESIS_CREATOR_DB: dbPath, OPENROUTER_API_KEY: 'test-key', OPENROUTER_ENDPOINT: stubUrl, OPENROUTER_RPM: '60' },
+      silent: true,
+    });
+    const port = await new Promise((resolve, reject) => {
+      let out = '';
+      const timer = setTimeout(() => reject(new Error('timeout subserver')), 15000);
+      child.stdout.on('data', (c) => {
+        out += String(c);
+        const nl = out.indexOf('\n');
+        if (nl >= 0) { clearTimeout(timer); resolve(Number(out.slice(0, nl).trim())); }
+      });
+      child.on('error', (e) => { clearTimeout(timer); reject(e); });
+      child.on('exit', (code) => { clearTimeout(timer); reject(new Error('subserver uscito, codice ' + code)); });
+    });
+    const base = 'http://127.0.0.1:' + port;
+    const asJson = (method, path, body) => fetch(base + path, {
+      method, headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+
+    await seedAutorePensiero(asJson);
+    let r = await asJson('POST', '/api/cards', { id: 'hb-1', modelloId: 'filosofia:autore-pensiero', titolo: 'Kant' });
+    assert.equal(r.status, 201);
+    // Livello invalido -> 400 senza toccare l'LLM
+    r = await asJson('POST', '/api/cards/hb-1/handbook/superioria', {});
+    assert.equal(r.status, 400);
+    // Scheda vuota -> 400
+    r = await asJson('POST', '/api/cards/hb-1/handbook/medie', {});
+    assert.equal(r.status, 400);
+    // GET prima della generazione -> 404
+    r = await asJson('GET', '/api/cards/hb-1/handbook/medie');
+    assert.equal(r.status, 404);
+    // Salva una sezione, poi genera
+    r = await asJson('PATCH', '/api/cards/hb-1/sections/vita', { corpo: { text: 'Kant nacque a Konigsberg nel 1724 e vi morì nel 1804.' } });
+    assert.equal(r.status, 200);
+    r = await asJson('POST', '/api/cards/hb-1/handbook/medie', {});
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.capitolo.livello, 'medie');
+    assert.ok(r.body.capitolo.chars > 10);
+    // Download memorizzato
+    const dl = await fetch(base + '/api/cards/hb-1/handbook/medie');
+    assert.equal(dl.status, 200);
+    assert.ok((dl.headers.get('content-type') || '').includes('text/markdown'));
+    const text = await dl.text();
+    assert.ok(text.includes('# Kant per tutti'));
+    // Dettaglio scheda: stato handbook presente, non datato
+    r = await asJson('GET', '/api/cards/hb-1');
+    assert.ok(Array.isArray(r.body.handbook));
+    assert.equal(r.body.handbook.length, 1);
+    assert.equal(r.body.handbook[0].livello, 'medie');
+    assert.equal(r.body.handbook[0].datato, false);
+  } finally {
+    if (child) {
+      try { child.kill('SIGTERM'); } catch {}
+      await new Promise((r2) => setTimeout(r2, 50));
+      try { child.kill('SIGKILL'); } catch {}
+    }
+    if (stub) await new Promise((r2) => stub.close(r2));
+    if (previousDb === undefined) delete process.env.NOESIS_CREATOR_DB; else process.env.NOESIS_CREATOR_DB = previousDb;
+    await rmDir7(dir, { recursive: true, force: true });
+  }
+});

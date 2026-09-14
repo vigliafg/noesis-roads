@@ -11,6 +11,7 @@ import {
 } from './noesis-roads-creator/pdf-payloads.mjs';
 import { buildExportModel } from './noesis-roads-creator/export-model.mjs';
 import { toMarkdown, toJson, toHtml, toSlidesHtml, toEpub } from './noesis-roads-creator/export-formats.mjs';
+import { buildHandbookPrompts, isHandbookLevel, normHandbookLevel } from './noesis-roads-creator/handbook.mjs';
 
 export const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
@@ -20,7 +21,7 @@ import {
   getDetailContentRO, listSourcesRO, listSimilarWorksRO, getSimilarImageRO,
   listReadySubjectsRO, getSubjectRO, getSubjectWorkImageRO,
   listReadyComparisonsRO, getComparisonRO, getComparisonSideImageRO, getComparisonThumbRO,
-  listMaterieRO, listModelliRO, listReadySchedeRO, getSchedaFullRO, getImmagineRO
+  listMaterieRO, listModelliRO, listReadySchedeRO, getSchedaFullRO, getImmagineRO, getHandbookRO
 } from './noesis-roads-creator/db.mjs';
 
 function loadLocalEnv() {
@@ -838,6 +839,42 @@ export function createAppServer() { return createServer((req, res) => { if (req.
       } catch (e) {
         return json(res, 500, error('EXPORT_ERROR', e.message));
       }
+    }
+    if (req.method === 'GET' && req.url && /^\/api\/cards\/[^/]+\/handbook\.(superiori|medie|elementari)$/.test(req.url)) {
+      const m = req.url.match(/^\/api\/cards\/([^/]+)\/handbook\.(superiori|medie|elementari)$/);
+      const id = decodeURIComponent(m[1]), livello = m[2];
+      let cap = null;
+      try { cap = getHandbookRO(id, livello); } catch (e) {}
+      if (!cap || !String(cap.markdown || '').trim()) return json(res, 404, error('NOT_FOUND', 'Capitolo non ancora generato: generalo da noesis-roads-creator'));
+      let full = null;
+      try { full = getSchedaFullRO(id); } catch (e) {}
+      if (!full || full.stato !== 'ready') return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica la scheda da noesis-roads-creator'));
+      const buf = Buffer.from(cap.markdown, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Length': buf.length, 'Content-Disposition': 'attachment; filename="' + slugify(full.titolo || 'scheda') + '-handbook-' + livello + '.md"', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+      res.end(buf);
+    }
+    if (req.method === 'POST' && req.url && /^\/api\/cards\/[^/]+\/handbook\.(superiori|medie|elementari)$/.test(req.url)) {
+      // Viewer resta read-only: genera on-demand SENZA memorizzare (la memorizzazione avviene nel creator).
+      const m = req.url.match(/^\/api\/cards\/([^/]+)\/handbook\.(superiori|medie|elementari)$/);
+      const id = decodeURIComponent(m[1]), livello = normHandbookLevel(m[2]);
+      if (!isHandbookLevel(livello)) return json(res, 400, error('INVALID_REQUEST', 'Livello handbook non valido'));
+      const apiKey = getOpenRouterApiKey();
+      if (!apiKey) return json(res, 503, error('OPENROUTER_NOT_CONFIGURED', 'OPENROUTER_API_KEY non configurata'));
+      let full = null;
+      try { full = getSchedaFullRO(id); } catch (e) {}
+      if (!full || full.stato !== 'ready') return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica la scheda da noesis-roads-creator'));
+      if (!(full.sezioni || []).length) return json(res, 400, error('EMPTY_CARD', PDF_GATE));
+      let prompt = null;
+      try {
+        prompt = buildHandbookPrompts({ livello, titolo: full.titolo, markdown: toMarkdown(buildExportModel(full, pdfIoRO())) });
+      } catch (e) {
+        return json(res, 500, error('HANDBOOK_ERROR', e.message));
+      }
+      return callModel(TEXT_MODEL, [{ type: 'text', text: prompt.user }], apiKey, globalThis.fetch, { system: prompt.system, maxTokens: prompt.maxTokens }).then((raw) => {
+        const text = String((raw && raw.data && (raw.data.observation || raw.data.text)) || '').trim();
+        if (!text) return json(res, 502, error('HANDBOOK_ERROR', 'Generazione capitolo non riuscita: risposta inutilizzabile'));
+        return json(res, 200, { capitolo: { livello, chars: text.length, markdown: text } });
+      }).catch((e) => json(res, 502, error('HANDBOOK_ERROR', 'Generazione capitolo non riuscita (' + (e.message || e) + ')')));
     }
     if (req.method === 'GET' && req.url && /^\/api\/subjects\/[^/]+$/.test(req.url)) {
       let payload = null;

@@ -331,6 +331,37 @@ function downloadPdf(path, fallbackName) {
   });
 }
 
+/* handbook-chapter: scarica il capitolo memorizzato, oppure generalo via POST e poi scaricalo */
+function downloadHandbookHB(cardId, livello, el) {
+  var base = '/api/cards/' + encodeURIComponent(cardId) + '/handbook/' + livello;
+  var old = el ? el.textContent : '';
+  if (el) el.textContent = '⏳ Generazione…';
+  toast('Capitolo ' + livello + ' in preparazione…');
+  var save = function (res) {
+    var cd = res.headers.get('content-disposition') || '';
+    var m = cd.match(/filename="?([^";]+)"?/);
+    return res.blob().then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = m ? m[1] : ('handbook-' + livello + '.md');
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+      toast('Capitolo scaricato', true);
+    });
+  };
+  fetch(base).then(function (res) {
+    if (res.ok) return save(res);
+    return fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(function (rp) {
+      if (!rp.ok) return rp.json().catch(function () { return {}; }).then(function (b) { throw new Error(b.error || ('HTTP ' + rp.status)); });
+      return fetch(base).then(function (rg) { if (!rg.ok) throw new Error('HTTP ' + rg.status); return save(rg); });
+    });
+  }).catch(function (e) {
+    toast('Capitolo non generato: ' + e.message);
+  }).then(function () {
+    if (el) el.textContent = old;
+  });
+}
+
 /* ================= util ================= */
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function toast(msg, ok) {
@@ -659,6 +690,7 @@ function cardApplyFull(s, full) {
   s.verifiche = full.verifiche || [];
   s.arricchimenti = {};
   (full.arricchimenti || []).forEach(function (a) { s.arricchimenti[a.chiave] = a; });
+  s.handbook = full.handbook || [];
 }
 function cardActiveDefs(s) {
   var defs = ((s.modello && s.modello.schema && s.modello.schema.sections) || []);
@@ -812,14 +844,26 @@ function renderCardStudio() {
   if (!s) { s = cardStudio = new CardStudioView(); }
   var isNew = !s.id;
   var expMenu = function () {
-    if (!(s.stato === 'ready' && s.id)) return '';
+    if (!s.id) return '';
     var base = '/api/cards/' + encodeURIComponent(s.id);
     var link = function (href, label) { return '<a href="' + href + '">' + label + '</a>'; };
+    var hb = {};
+    (s.handbook || []).forEach(function (h) { hb[h.livello] = h; });
+    var hbLink = function (liv, label) {
+      var mark = hb[liv] ? (hb[liv].datato ? ' (datato)' : ' ✓') : '';
+      return '<a href="#" onclick="downloadHandbookHB(\'' + s.id.replace(/'/g, '') + '\',\'' + liv + '\',this);return false">' + label + mark + '</a>';
+    };
+    var det8 = s.stato === 'ready'
+      ? link(base + '/pdf', 'PDF') + link(base + '/export.md', 'Markdown') + link(base + '/export.json', 'JSON') +
+        link(base + '/export.html', 'HTML') + link(base + '/export.slides', 'Slide HTML') + link(base + '/export.epub', 'EPUB') +
+        link(base + '/export.docx', 'Word') + link(base + '/export.pptx', 'Slide PPTX')
+      : '<span class="step-note">Export pronti dopo la pubblicazione</span>';
     return '<details class="btn small" style="position:relative;display:inline-block"><summary>⬇ Esporta</summary>' +
-      '<div style="position:absolute;right:0;top:110%;background:var(--white);border:1px solid var(--line);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:2px;z-index:50;min-width:130px">' +
-      link(base + '/pdf', 'PDF') + link(base + '/export.md', 'Markdown') + link(base + '/export.json', 'JSON') +
-      link(base + '/export.html', 'HTML') + link(base + '/export.slides', 'Slide HTML') + link(base + '/export.epub', 'EPUB') +
-      link(base + '/export.docx', 'Word') + link(base + '/export.pptx', 'Slide PPTX') + '</div></details>';
+      '<div style="position:absolute;right:0;top:110%;background:var(--white);border:1px solid var(--line);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:2px;z-index:50;min-width:160px">' +
+      det8 +
+      '<span class="step-note" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px">📖 Handbook</span>' +
+      hbLink('superiori', 'Capitolo superiori') + hbLink('medie', 'Capitolo medie') + hbLink('elementari', 'Capitolo elementari') +
+      '</div></details>';
   };
   var html = topbar('',
     expMenu() +
