@@ -115,7 +115,9 @@ export function buildExportModel(full, io = {}) {
     type: 'lezione',
     titolo: full.titolo || 'Lezione senza titolo',
     eyebrow: (schema.cover && schema.cover.eyebrow) || 'Lezione',
-    subtitle: [schema.subject, schema.name].filter(Boolean).join(' · '),
+    // Il subject vive già in eyebrow ("Scheda didattica · filosofia") e in
+    // materiaId: il subtitle riporta solo il nome modello, senza duplicarlo.
+    subtitle: schema.name || schema.subject || '',
     materiaId: schema.subject || '',
     modello: { id: (full.modello && full.modello.id) || '', chiave: (full.modello && full.modello.chiave) || '', nome: (full.modello && (full.modello.schema.name || full.modello.nome)) || '' },
     livelli: { verbosita: lvl(full.verbosita), istruzione: lvl(full.istruzione) },

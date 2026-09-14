@@ -239,8 +239,8 @@ class ArtDoc(BaseDocTemplate):
         canvas.drawCentredString(W / 2, y, esc(p.get('eyebrow', '')).upper())
         y -= 1.6 * cm
 
-        # titolo (wrappato)
-        title = esc(p.get('title', ''))
+        # titolo (wrappato; il modello export usa `titolo`, i payload arte `title`)
+        title = esc(p.get('title') or p.get('titolo', ''))
         canvas.setFillColor(INK)
         canvas.setFont(SERIF_B, 30)
         lines = self._wrap(title, W - 2 * inset - 3 * cm, SERIF_B, 30)
@@ -272,13 +272,17 @@ class ArtDoc(BaseDocTemplate):
                 y -= 0.5 * cm
             y -= 0.6 * cm
 
-        # immagine hero
+        # immagine hero (se assente: filetto decorativo, niente buco vuoto)
         hero = self.imgbag.path(p.get('coverImage')) if self.imgbag else None
         if hero:
             avail_w = W - 2 * inset - 2.4 * cm
             avail_h = max(4 * cm, y - (inset + 3.0 * cm))
             w, h = fit_wh(hero, avail_w, avail_h)
             canvas.drawImage(hero, (W - w) / 2, y - h, width=w, height=h, preserveAspectRatio=True, mask='auto')
+        else:
+            canvas.setStrokeColor(RULE)
+            canvas.setLineWidth(0.8)
+            canvas.line(W / 2 - 3 * cm, y - 0.4 * cm, W / 2 + 3 * cm, y - 0.4 * cm)
 
         canvas.setFillColor(GREY)
         canvas.setFont(SANS, 8)
@@ -298,7 +302,7 @@ class ArtDoc(BaseDocTemplate):
         # intestazione
         canvas.setFillColor(MUTED)
         canvas.setFont(SANS_B, 8.5)
-        canvas.drawString(2.4 * cm, H - 1.35 * cm, esc(self.payload.get('title', '')).upper())
+        canvas.drawString(2.4 * cm, H - 1.35 * cm, esc(self.payload.get('title') or self.payload.get('titolo', '')).upper())
         canvas.setStrokeColor(LINE)
         canvas.setLineWidth(0.6)
         canvas.line(2.4 * cm, H - 1.55 * cm, W - 2.4 * cm, H - 1.55 * cm)
@@ -388,7 +392,10 @@ def build_lezione_story(payload, doc):
     Copertina (onPage) -> indice TOC -> capitoli con badge verifica -> fonti."""
     s = styles()
     bag = doc.imgbag
-    st = [NextPageTemplate('front')]
+    # Pagina 1 = solo copertina (disegnata da onPage): il PageBreak iniziale
+    # sposta subito i flowable sul template 'front'. Senza, INDICE+TOC
+    # finirebbero nel frame piena-pagina della cover, sopra il titolo.
+    st = [NextPageTemplate('front'), PageBreak()]
     st.append(Paragraph('INDICE', s['chapterNum']))
     toc = TableOfContents()
     toc.levelStyles = [
@@ -397,12 +404,13 @@ def build_lezione_story(payload, doc):
     ]
     toc.dotsMinLevel = 0
     st.append(toc)
-    st.append(PageBreak())
     st.append(NextPageTemplate('body'))
+    st.append(PageBreak())
     n = 0
     for sec in payload.get('sections', []):
         n += 1
-        st.append(PageBreak())
+        if n > 1:
+            st.append(PageBreak())
         st.append(Paragraph(f'CAPITOLO {roman(n)}', s['chapterNum']))
         st.append(Paragraph(esc(sec.get('title', '')), s['chapter']))
         v = sec.get('verifica') or {}

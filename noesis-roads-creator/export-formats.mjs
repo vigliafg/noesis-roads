@@ -244,9 +244,17 @@ export function toEpub(m) {
     return '';
   }).join('');
   spine.push(chap(m.titolo, `<p><i>${escH(m.subtitle)} — ${escH(m.livelli.verbosita)} / ${escH(m.livelli.istruzione)}</i></p>` + (m.coverImage ? eimg(m.coverImage, m.titolo) : '')));
-  for (const s of m.sections) spine.push(chap(s.title, eb(s.blocks)));
-  if (m.fonti.length) spine.push(chap('Fonti', '<ul>' + m.fonti.map((f) => `<li><a href="${escH(f.url)}">${escH(f.title)}</a></li>`).join('') + '</ul>'));
-  const opf = `<?xml version="1.0" encoding="utf-8"?><package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escH(m.titolo)}</dc:title><dc:language>it</dc:language><dc:identifier id="id">noesis-${Date.now()}</dc:identifier></metadata><manifest>${items.join('')}</manifest><spine>${spine.map((_, i) => `<itemref idref="c${i + 1}"/>`).join('')}</spine></package>`;
+  const spineTitles = [m.titolo];
+  for (const s of m.sections) { spine.push(chap(s.title, eb(s.blocks))); spineTitles.push(s.title); }
+  if (m.fonti.length) { spine.push(chap('Fonti', '<ul>' + m.fonti.map((f) => `<li><a href="${escH(f.url)}">${escH(f.title)}</a></li>`).join('') + '</ul>')); spineTitles.push('Fonti'); }
+  // NCX (EPUB 2): senza mappa di navigazione i reader non mostrano alcun TOC.
+  const uid = 'noesis-' + Date.now();
+  const navPoints = spine.map((href, i) =>
+    `<navPoint id="np${i + 1}" playOrder="${i + 1}"><navLabel><text>${escH(spineTitles[i] || ('Capitolo ' + (i + 1)))}</text></navLabel><content src="${escH(href)}"/></navPoint>`).join('');
+  const ncx = `<?xml version="1.0" encoding="utf-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="${uid}"/><meta name="dtb:depth" content="1"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>${escH(m.titolo)}</text></docTitle><navMap>${navPoints}</navMap></ncx>`;
+  files.push({ name: 'OEBPS/toc.ncx', data: Buffer.from(ncx, 'utf8') });
+  items.push('<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>');
+  const opf = `<?xml version="1.0" encoding="utf-8"?><package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escH(m.titolo)}</dc:title><dc:language>it</dc:language><dc:identifier id="id">${uid}</dc:identifier></metadata><manifest>${items.join('')}</manifest><spine toc="ncx">${spine.map((_, i) => `<itemref idref="c${i + 1}"/>`).join('')}</spine></package>`;
   files.push({ name: 'OEBPS/content.opf', data: Buffer.from(opf, 'utf8') });
   return zipArchive(files);
 }
