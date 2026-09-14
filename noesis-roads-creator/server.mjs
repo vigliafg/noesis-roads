@@ -1651,12 +1651,42 @@ function handleApi(req, res, urlPath) {
     return json(res, 200, { ok: true });
   }
 
-  // GET|HEAD /api/cards/:id/pdf — PDF "libro d'arte" della scheda generica
+  // GET|HEAD /api/cards/:id/pdf — PDF editoriale della lezione (indice, livelli, verifica, fonti)
   if ((method === 'GET' || method === 'HEAD') && parts.length === 4 && parts[0] === 'api' && parts[1] === 'cards' && parts[3] === 'pdf') {
     const full = getSchedaFull(parts[2]);
     if (!full) return err(res, 404, 'Scheda non trovata');
     if (!(full.sezioni || []).length) return err(res, 400, 'Genera e salva prima i contenuti: il PDF esporta la scheda completa.');
-    return sendPdf(res, buildGenericPdfPayload(full), slugify(full.titolo || 'scheda') + '.pdf');
+    return sendPdf(res, buildExportModel(full), slugify(full.titolo || 'scheda') + '.pdf');
+  }
+
+  // GET /api/cards/:id/export.<fmt> — md|json|html|slides|epub (Node) · docx|pptx (Python)
+  if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'cards' && parts[3].startsWith('export.')) {
+    const fmt = parts[3].slice('export.'.length);
+    const full = getSchedaFull(parts[2]);
+    if (!full) return err(res, 404, 'Scheda non trovata');
+    if (!(full.sezioni || []).length) return err(res, 400, 'Genera e salva prima i contenuti: export della scheda completa.');
+    const base = slugify(full.titolo || 'scheda');
+    try {
+      const model = buildExportModel(full);
+      if (fmt === 'md') return sendBlob(res, Buffer.from(toMarkdown(model), 'utf8'), 'text/markdown; charset=utf-8', base + '.md');
+      if (fmt === 'json') return sendBlob(res, Buffer.from(toJson(model), 'utf8'), 'application/json; charset=utf-8', base + '.json');
+      if (fmt === 'html') return sendBlob(res, Buffer.from(toHtml(model), 'utf8'), 'text/html; charset=utf-8', base + '.html');
+      if (fmt === 'slides') return sendBlob(res, Buffer.from(toSlidesHtml(model), 'utf8'), 'text/html; charset=utf-8', base + '-slide.html');
+      if (fmt === 'epub') return sendBlob(res, toEpub(model), 'application/epub+zip', base + '.epub');
+      if (fmt === 'docx' || fmt === 'pptx') {
+        const script = fmt === 'docx' ? 'make_docx.py' : 'make_slides.py';
+        return renderOffice(script, model, fmt).then((buf) => sendBlob(res, buf,
+          fmt === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          base + '.' + fmt)).catch((e) => {
+          const message = String((e && e.message) || e);
+          return err(res, /non installato|non trovata/.test(message) ? 503 : 500, message);
+        });
+      }
+      return err(res, 400, 'Formato non supportato (md|json|html|slides|epub|docx|pptx)');
+    } catch (e) {
+      const message = String((e && e.message) || e);
+      return err(res, /non installato|non trovata/.test(message) ? 503 : 500, message);
+    }
   }
 
   return err(res, 404, 'Endpoint non trovato: ' + method + ' ' + urlPath);
@@ -1809,6 +1839,8 @@ import {
   buildArtworkPdfPayload, buildSubjectPdfPayload, buildComparisonPdfPayload, buildGenericPdfPayload,
   normalizeSectionBody,
 } from './pdf-payloads.mjs';
+import { buildExportModel } from './export-model.mjs';
+import { toMarkdown, toJson, toHtml, toSlidesHtml, toEpub } from './export-formats.mjs';
 
 async function renderPdf(payload) {
   const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -1848,6 +1880,37 @@ function sendPdf(res, payload, filename) {
     const message = String((e && e.message) || e);
     err(res, message.includes('reportlab') ? 503 : 500, message);
   });
+}
+
+async function renderOffice(script, model, ext) {
+  const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const inPath = join(UPLOAD_DIR, `office-${stamp}.json`);
+  const outPath = join(UPLOAD_DIR, `office-${stamp}.${ext}`);
+  await writeFile(inPath, JSON.stringify(model));
+  try {
+    try {
+      await execFileAsync('python3', [script, inPath, outPath], { cwd: APP_ROOT, timeout: 180000 });
+    } catch (e) {
+      const stderr = String((e && e.stderr) || '');
+      if (/non installato/.test(stderr)) throw new Error(stderr.split('\n').filter(Boolean)[0]);
+      throw new Error('Generazione ' + ext.toUpperCase() + ' fallita: ' + (stderr.split('\n').filter(Boolean).pop() || e.message));
+    }
+    return await readFile(outPath);
+  } finally {
+    unlink(inPath).catch(() => {});
+    unlink(outPath).catch(() => {});
+  }
+}
+
+function sendBlob(res, buf, contentType, filename) {
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Content-Length': buf.length,
+    'Content-Disposition': 'attachment; filename="' + filename + '"',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.end(buf);
 }
 
 // ---------- Schede Soggetto e Faccia a faccia: serializzatori, prompt, normalizzatori ----------

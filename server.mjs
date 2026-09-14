@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import {
   buildArtworkPdfPayload, buildSubjectPdfPayload, buildComparisonPdfPayload, buildGenericPdfPayload,
 } from './noesis-roads-creator/pdf-payloads.mjs';
+import { buildExportModel } from './noesis-roads-creator/export-model.mjs';
+import { toMarkdown, toJson, toHtml, toSlidesHtml, toEpub } from './noesis-roads-creator/export-formats.mjs';
 
 export const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
@@ -796,7 +798,46 @@ export function createAppServer() { return createServer((req, res) => { if (req.
       try { full = getSchedaFullRO(id); } catch (e) {}
       if (!full || full.stato !== 'ready') return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica la scheda da noesis-roads-creator'));
       if (!(full.sezioni || []).length) return json(res, 400, error('EMPTY_CARD', PDF_GATE));
-      return sendPdf(res, buildGenericPdfPayload(full, pdfIoRO()), slugify(full.titolo || 'scheda') + '.pdf');
+      return sendPdf(res, buildExportModel(full, pdfIoRO()), slugify(full.titolo || 'scheda') + '.pdf');
+    }
+    if (req.method === 'GET' && req.url && /^\/api\/cards\/[^/]+\/export\.(md|json|html|slides|epub|docx|pptx)$/.test(req.url)) {
+      const m = req.url.match(/^\/api\/cards\/([^/]+)\/export\.(md|json|html|slides|epub|docx|pptx)$/);
+      const id = decodeURIComponent(m[1]), fmt = m[2];
+      let full = null;
+      try { full = getSchedaFullRO(id); } catch (e) {}
+      if (!full || full.stato !== 'ready') return json(res, 404, error('NOT_FOUND', 'Scheda non trovata: pubblica la scheda da noesis-roads-creator'));
+      if (!(full.sezioni || []).length) return json(res, 400, error('EMPTY_CARD', PDF_GATE));
+      const base = slugify(full.titolo || 'scheda');
+      try {
+        const model = buildExportModel(full, pdfIoRO());
+        const send = (buf, ct, fn) => {
+          res.writeHead(200, { 'Content-Type': ct, 'Content-Length': buf.length, 'Content-Disposition': 'attachment; filename="' + fn + '"', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+          res.end(buf);
+        };
+        if (fmt === 'md') return send(Buffer.from(toMarkdown(model), 'utf8'), 'text/markdown; charset=utf-8', base + '.md');
+        if (fmt === 'json') return send(Buffer.from(toJson(model), 'utf8'), 'application/json; charset=utf-8', base + '.json');
+        if (fmt === 'html') return send(Buffer.from(toHtml(model), 'utf8'), 'text/html; charset=utf-8', base + '.html');
+        if (fmt === 'slides') return send(Buffer.from(toSlidesHtml(model), 'utf8'), 'text/html; charset=utf-8', base + '-slide.html');
+        if (fmt === 'epub') return send(toEpub(model), 'application/epub+zip', base + '.epub');
+        const script = fmt === 'docx' ? 'make_docx.py' : 'make_slides.py';
+        const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        const inPath = join(tmpdir(), `noesis-${stamp}.json`);
+        const outPath = join(tmpdir(), `noesis-${stamp}.${fmt}`);
+        return writeFile(inPath, JSON.stringify(model)).then(() =>
+          execFileAsync('python3', [script, inPath, outPath], { cwd: PDF_CWD, timeout: 180000 }).then(async () => {
+            const buf = await readFile(outPath);
+            unlink(inPath).catch(() => {});
+            unlink(outPath).catch(() => {});
+            return send(buf, fmt === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/vnd.openxmlformats-officedocument.presentationml.presentation', base + '.' + fmt);
+          }).catch((e) => {
+            unlink(inPath).catch(() => {});
+            unlink(outPath).catch(() => {});
+            const message = String(((e && e.stderr) || e.message) || e);
+            return json(res, /non installato/.test(message) ? 503 : 500, error('EXPORT_ERROR', message));
+          }));
+      } catch (e) {
+        return json(res, 500, error('EXPORT_ERROR', e.message));
+      }
     }
     if (req.method === 'GET' && req.url && /^\/api\/subjects\/[^/]+$/.test(req.url)) {
       let payload = null;

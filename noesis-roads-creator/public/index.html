@@ -438,37 +438,12 @@ function fasciaModelli() {
   }
   return html + '</div>';
 }
-function fasciaSchede() {
-  var html = '<div class="card" id="fascia-schede" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">➕ Crea schede</span></div>' +
-    '<p class="step-note">Scegli il modello e parti: la bozza la riempi con l’AI. Appena creata, la trovi in Lezioni con il marchio <strong>draft</strong>.</p>';
-  if (!state.materie.length) html += '<p class="step-note">Nessuna materia.</p>';
-  else {
-    html += '<div class="fascia-row">';
-    state.materie.forEach(function (m) {
-    var mh = '<div class="fascia-mat">';
-    var std = homeStdModels(m.id);
-    mh += '<h3>📚 ' + esc(m.nome || m.id) + '</h3>';
-    if (!std.length) {
-      mh += '<p class="step-note">Ancora nessun modello utilizzabile in questa materia.</p>';
-    } else {
-      std.forEach(function (mod) {
-        var sid = modelSid(mod);
-        mh += '<div style="margin-bottom:10px"><button class="btn small primary" style="width:100%" data-new-model="' + esc(sid) + '">＋ Nuova scheda «' + esc(mod.nome || mod.chiave) + '»</button></div>';
-      });
-    }
-    mh += '</div>';
-    html += mh;
-    });
-    html += '</div>';
-  }
-  return html + '</div>';
-}
 function goFasciaSchede() {
-  // Unica porta d'ingresso: la fascia Crea schede (niente più studio vuoto).
+  // Unica porta d'ingresso: la fascia Lezioni (niente più studio vuoto).
   var scroll = function () {
     var tries = 0;
     var tick = function () {
-      var el = document.getElementById('fascia-schede');
+      var el = document.getElementById('fascia-lezioni');
       if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
       if (++tries < 30) setTimeout(tick, 100);
     };
@@ -482,8 +457,8 @@ function vediLezione(cardId) {
   window.open(viewer.replace(/\/$/, '') + '/?open=' + encodeURIComponent(cardId), '_blank');
 }
 function fasciaLezioni() {
-  var html = '<div class="card" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">🎓 Fascia lezioni — schede e lezioni</span></div>' +
-    '<p class="step-note">Tutte le schede create: marchio <strong>draft</strong> se ancora da finire/approvare, <strong>release</strong> quando approvate e pronte da studiare.</p>';
+  var html = '<div class="card" id="fascia-lezioni" style="margin-bottom:18px"><div class="step-head"><span class="eyebrow">🎓 Lezioni</span></div>' +
+    '<p class="step-note">Tutte le tue schede, bozze prima e lezioni poi: marchio <strong>draft</strong> da finire, <strong>release</strong> da studiare. In cima a ogni materia, i bottoni per crearne di nuove.</p>';
   if (!state.materie.length) html += '<p class="step-note">Nessuna materia.</p>';
   else {
     html += '<div class="fascia-row">';
@@ -495,6 +470,10 @@ function fasciaLezioni() {
     var drafts = all.filter(function (c) { return c.stato !== 'ready'; });
     var ready = all.filter(function (c) { return c.stato === 'ready'; });
     mh += '<h3>📚 ' + esc(m.nome || m.id) + '</h3>';
+    homeStdModels(m.id).forEach(function (mod) {
+      var sid = modelSid(mod);
+      mh += '<div style="margin-bottom:10px"><button class="btn small primary" style="width:100%" data-new-model="' + esc(sid) + '">＋ Nuova scheda «' + esc(mod.nome || mod.chiave) + '»</button></div>';
+    });
     if (!all.length) {
       mh += '<p class="step-note">Ancora nessuna lezione.</p>';
     } else {
@@ -532,10 +511,9 @@ function renderHome() {
   var   html = topbar('',
     '<button class="btn primary small" data-nav="new-card">+ Nuova scheda</button>' +
     '<button class="btn small" data-nav="new-materia">+ Nuova materia</button>');
-  html += '<h1 class="page-title">Modelli, schede, lezioni</h1>';
-  html += '<p class="lead">Tre fasce, un ciclo: 📐 i <strong>modelli</strong> (gli stampi, si toccano di rado) → 📝 le <strong>schede</strong> (crea una bozza dal modello) → 🎓 le <strong>lezioni</strong> (<strong>draft</strong> da finire, <strong>release</strong> quando approvate).</p>';
+  html += '<h1 class="page-title">Modelli e lezioni</h1>';
+  html += '<p class="lead">Due fasce: 📐 i <strong>modelli</strong> (gli stampi, si toccano di rado) → 🎓 le <strong>lezioni</strong> (creale dai modelli, <strong>draft</strong> da finire, <strong>release</strong> da studiare).</p>';
   html += fasciaModelli();
-  html += fasciaSchede();
   html += fasciaLezioni();
   appEl.innerHTML = html;
 }
@@ -833,7 +811,18 @@ function renderCardStudio() {
   var s = cardStudio;
   if (!s) { s = cardStudio = new CardStudioView(); }
   var isNew = !s.id;
+  var expMenu = function () {
+    if (!(s.stato === 'ready' && s.id)) return '';
+    var base = '/api/cards/' + encodeURIComponent(s.id);
+    var link = function (href, label) { return '<a href="' + href + '">' + label + '</a>'; };
+    return '<details class="btn small" style="position:relative;display:inline-block"><summary>⬇ Esporta</summary>' +
+      '<div style="position:absolute;right:0;top:110%;background:var(--white);border:1px solid var(--line);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:2px;z-index:50;min-width:130px">' +
+      link(base + '/pdf', 'PDF') + link(base + '/export.md', 'Markdown') + link(base + '/export.json', 'JSON') +
+      link(base + '/export.html', 'HTML') + link(base + '/export.slides', 'Slide HTML') + link(base + '/export.epub', 'EPUB') +
+      link(base + '/export.docx', 'Word') + link(base + '/export.pptx', 'Slide PPTX') + '</div></details>';
+  };
   var html = topbar('',
+    expMenu() +
     (s.stato === 'ready' && s.id ? '<button class="btn small" data-pdf onclick="downloadPdf(\'/api/cards/\' + cardStudio.id + \'/pdf\', \'scheda.pdf\')">⬇ PDF</button>' : '') +
     '<button class="btn small" data-nav="home">← Elenco</button>');
   html += '<h1 class="page-title">' + (isNew ? 'Nuova scheda' : esc(s.titolo || 'Scheda')) + '</h1>';
@@ -886,11 +875,11 @@ function renderCardStudio() {
         var stale = cardStaleKeys(s);
         return stale.length ? '<button class="btn" id="csRegenStale" style="padding:14px 22px">🔄 Rigenera le ' + stale.length + ' stale con questi livelli</button>' : '';
       })() +
-      '<button class="btn" id="csSaveAll" style="padding:14px 22px">💾 Salva tutto</button>' +
+      '<button class="btn" id="csSaveAll" style="padding:14px 22px">💾 Salva bozza</button>' +
       '<button class="btn" id="csVerify" style="padding:14px 22px">🔍 Verifica fatti</button>' +
-      '<button class="btn green" id="csApprove" style="padding:14px 22px">✅ Approva</button>' +
+      '<button class="btn green" id="csApprove" style="padding:14px 22px">🎓 Pubblica lezione</button>' +
       '<button class="btn ghost" id="csDelete">🗑 Elimina</button>' +
-      '<span class="step-note" id="csNote">Genera o compila le sezioni, salva ciascuna, poi approva.</span></div>';
+      '<span class="step-note" id="csNote">Genera o compila le sezioni, salva la bozza e poi pubblicala come lezione.</span></div>';
     html += cardVerificheHtml(s);
   }
   appEl.innerHTML = html;

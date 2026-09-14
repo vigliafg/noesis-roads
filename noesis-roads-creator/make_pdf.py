@@ -19,6 +19,7 @@ try:
     from reportlab.platypus import (BaseDocTemplate, PageTemplate, Frame, Paragraph,
                                     Spacer, Image, PageBreak, Table, TableStyle,
                                     KeepTogether, NextPageTemplate, HRFlowable)
+    from reportlab.platypus.tableofcontents import TableOfContents
     from reportlab.lib import colors
 except ImportError as exc:  # pragma: no cover
     print('ERRORE_PDF: reportlab non installato. Esegui: pip install reportlab', file=sys.stderr)
@@ -209,9 +210,11 @@ class ArtDoc(BaseDocTemplate):
         super().__init__(path, pagesize=A4, leftMargin=2.4*cm, rightMargin=2.4*cm,
                          topMargin=2.2*cm, bottomMargin=2.2*cm, **kw)
         cover = PageTemplate(id='cover', frames=[Frame(0, 0, W, H, id='c')], onPage=self._cover)
+        front = PageTemplate(id='front', frames=[Frame(2.4*cm, 2.2*cm, self.frame_w, self.frame_h, id='f')],
+                             onPage=self._front)
         body = PageTemplate(id='body', frames=[Frame(2.4*cm, 2.2*cm, self.frame_w, self.frame_h, id='b')],
                             onPage=self._body)
-        self.addPageTemplates([cover, body])
+        self.addPageTemplates([cover, front, body])
         self._fig = 0
 
     def _paper(self, canvas):
@@ -255,6 +258,12 @@ class ArtDoc(BaseDocTemplate):
             y -= 0.4 * cm
 
         meta = p.get('meta') or []
+        # Riga livelli + verifica (solo payload lezione da export-model).
+        lv = p.get('livelli') or {}
+        if lv.get('verbosita') or lv.get('istruzione'):
+            meta = list(meta) + [f"Livelli: {lv.get('verbosita', '')} / {lv.get('istruzione', '')}".strip(' /')]
+        if p.get('verificate'):
+            meta = list(meta) + [f"Verificato sul web ({p.get('dubbi', 0)} punti da ricontrollare)"]
         if meta:
             canvas.setFont(SANS, 9.5)
             canvas.setFillColor(MUTED)
@@ -276,8 +285,15 @@ class ArtDoc(BaseDocTemplate):
         canvas.drawCentredString(W / 2, inset + 0.9 * cm,
                                  'Scheda didattica · noesis-roads-creator')
 
+    def _front(self, canvas, doc):
+        # Copertina (1) e indice (2): solo carta, niente intestazione/piè.
+        self._paper(canvas)
+
     def _body(self, canvas, doc):
         W, H = A4
+        # copertina (1) e indice (2): niente intestazione/piè di pagina
+        if canvas.getPageNumber() <= 2:
+            return
         self._paper(canvas)
         # intestazione
         canvas.setFillColor(MUTED)
@@ -297,7 +313,9 @@ class ArtDoc(BaseDocTemplate):
         return simpleSplit(text, font, size, width)
 
     def afterFlowable(self, flowable):
-        pass
+        # Indice: ogni titolo di capitolo (stile 'chapter') alimenta il TOC.
+        if isinstance(flowable, Paragraph) and flowable.style.name == 'chapter':
+            self.notify('TOCEntry', (0, flowable.getPlainText(), self.page))
 
 
 # ---------- costruzione flowables ----------
@@ -362,6 +380,68 @@ def build_story(payload, doc):
             st.append(Paragraph(esc(block.get('text', '')), s['metaLine']))
         elif t == 'pagebreak':
             st.append(PageBreak())
+    return st
+
+
+def build_lezione_story(payload, doc):
+    """Story dal modello intermedio di esportazione (type 'lezione').
+    Copertina (onPage) -> indice TOC -> capitoli con badge verifica -> fonti."""
+    s = styles()
+    bag = doc.imgbag
+    st = [NextPageTemplate('front')]
+    st.append(Paragraph('INDICE', s['chapterNum']))
+    toc = TableOfContents()
+    toc.levelStyles = [
+        ParagraphStyle('toc0', fontName=SANS, fontSize=10.5, leading=16, textColor=INK,
+                       leftIndent=0, firstLineIndent=0, spaceBefore=3),
+    ]
+    toc.dotsMinLevel = 0
+    st.append(toc)
+    st.append(PageBreak())
+    st.append(NextPageTemplate('body'))
+    n = 0
+    for sec in payload.get('sections', []):
+        n += 1
+        st.append(PageBreak())
+        st.append(Paragraph(f'CAPITOLO {roman(n)}', s['chapterNum']))
+        st.append(Paragraph(esc(sec.get('title', '')), s['chapter']))
+        v = sec.get('verifica') or {}
+        if sec.get('verifica') is not None:
+            badge = 'Verificato sul web' if not v.get('dubbi') else f"{v['dubbi']} punti da ricontrollare"
+            st.append(Paragraph(esc(badge), s['metaLine']))
+        st.append(HRFlowable(width='100%', thickness=0.8, color=RULE, spaceBefore=2, spaceAfter=8))
+        for b in sec.get('blocks', []):
+            t = b.get('t')
+            if t == 'p':
+                st.append(Paragraph(esc(b.get('text', '')), s['body']))
+            elif t == 'h2':
+                st.append(Paragraph(esc(b.get('text', '')).upper(), s['h2']))
+            elif t == 'image':
+                path = bag.path(b.get('image')) if bag else None
+                im = img_flow(path, doc.frame_w, 14 * cm) if path else None
+                cap = b.get('caption') or ''
+                st.append(KeepTogether(([im] if im else []) + [Paragraph(esc(cap), s['caption'])]))
+            elif t == 'pair':
+                st.append(pair_block(b, doc, bag, s))
+            elif t == 'kv':
+                st.append(kv_block(b, s))
+            elif t == 'points':
+                st.extend(points_block(b, s))
+            elif t == 'gallery':
+                st.append(gallery_block(b, doc, bag, s))
+    if payload.get('fonti'):
+        st.append(PageBreak())
+        st.append(Paragraph('CAPITOLO ' + roman(n + 1), s['chapterNum']))
+        st.append(Paragraph('Fonti', s['chapter']))
+        st.append(HRFlowable(width='100%', thickness=0.8, color=RULE, spaceBefore=2, spaceAfter=8))
+        for f in payload['fonti']:
+            url = (f.get('url') or '').replace('&', '&amp;').replace('<', '&lt;')
+            title = esc(f.get('title') or f.get('url') or '')
+            st.append(Paragraph(f'{title} — <a href="{url}" color="#DC7056">{url}</a>', s['body']))
+    disc = payload.get('disclaimer')
+    if disc:
+        st.append(Spacer(1, 0.6 * cm))
+        st.append(Paragraph(esc(disc), s['small']))
     return st
 
 
@@ -459,9 +539,12 @@ def main():
     bag = ImgBag(payload.get('images'))
     try:
         doc = ArtDoc(out_path, payload, imgbag=bag)
-        doc.title = payload.get('title', 'Scheda didattica')
+        doc.title = payload.get('title', payload.get('titolo', 'Scheda didattica'))
         doc.author = 'noesis-roads-creator'
-        doc.build(build_story(payload, doc))
+        if payload.get('type') == 'lezione':
+            doc.multiBuild(build_lezione_story(payload, doc))
+        else:
+            doc.build(build_story(payload, doc))
         print('OK_PDF {}'.format(os.path.getsize(out_path)))
     finally:
         bag.cleanup()

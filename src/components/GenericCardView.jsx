@@ -38,8 +38,15 @@ function GenericCardView({ card, onBack }) {
           <button className="config-button hub-button" onClick={() => { location.href = hubUrl(); }} title="Torna all’hub di Noesis Roads"><span>←</span> Hub</button>
         </div>
         <div className="explore-progress"><span>02</span><i></i><span>{subtitle}</span></div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <a className="back-button" href={'/api/cards/' + encodeURIComponent(card.id) + '/pdf'} title="Scarica la lezione in PDF">⬇ PDF</a>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <details style={{ position: 'relative' }}>
+            <summary className="back-button" style={{ cursor: 'pointer', listStyle: 'none' }}>⬇ Esporta</summary>
+            <div style={{ position: 'absolute', right: 0, top: '110%', background: '#fffdf9', border: '1px solid #dedbd3', borderRadius: 8, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, zIndex: 50, minWidth: 130 }}>
+              {[['pdf', 'PDF'], ['export.md', 'Markdown'], ['export.json', 'JSON'], ['export.html', 'HTML'], ['export.slides', 'Slide HTML'], ['export.epub', 'EPUB'], ['export.docx', 'Word'], ['export.pptx', 'Slide PPTX']].map(function ([sfx, label]) {
+                return <a key={sfx} href={'/api/cards/' + encodeURIComponent(card.id) + '/' + sfx}>{label}</a>;
+              })}
+            </div>
+          </details>
           <button className="back-button" onClick={onBack}><span className="back-icon">←</span> Torna al catalogo</button>
         </div>
       </header>
