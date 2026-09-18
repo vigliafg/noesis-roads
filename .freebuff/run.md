@@ -36,6 +36,24 @@ node server.mjs            # http://127.0.0.1:18100  (porta: NOESIS_CREATOR_PORT
 
 La chiave `OPENROUTER_API_KEY` arriva da `.env.local`/`.env` alla radice del repo (loader condiviso col viewer). Il DB SQLite si crea da solo in `noesis-roads-creator/data/noesis-roads-creator.db` (riusa il precedente `artest-creator.db` se presente); le immagini caricate finiscono in `noesis-roads-creator/uploads/`.
 
+## Dipendenze Python (export PDF/DOCX/SLIDES)
+
+Python 3.13 è già presente (`C:\Program Files\Python313\python.exe`). Solo i moduli pip vanno installati una tantum:
+
+```bash
+python -m pip install pillow reportlab python-docx python-pptx markdown ebooklib
+```
+
+Su Windows i server invocano `python` (non `python3`, che è lo stub del Microsoft Store); su macOS/Linux `python3`. Override manuale: variabile `PYTHON_BIN`.
+
+## Viewer (noesis-roads)
+
+```bash
+node server.mjs            # http://127.0.0.1:18000  (porta: APP_PORT)
+```
+
+Nota: `server.py` è solo un demo minimo legacy — il viewer vero è `server.mjs` (condivide `db.mjs` col creator).
+
 ## Tests
 
 ```bash

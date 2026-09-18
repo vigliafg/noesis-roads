@@ -37,6 +37,10 @@ function loadLocalEnv() {
 }
 loadLocalEnv();
 
+// Binario Python: su Windows non esiste 'python3' (solo 'python' o il launcher 'py');
+// su macOS/Linux 'python3' è la norma. Override manuale: PYTHON_BIN.
+export const PYTHON_BIN = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
+
 export const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions';
 export const VISION_MODEL = process.env.OPENROUTER_VISION_MODEL || 'meta/muse-spark-1.3-contributor';
 export const TEXT_MODEL = process.env.OPENROUTER_TEXT_MODEL || 'meta/muse-spark-1.3-contributor';
@@ -600,7 +604,7 @@ async function renderPdf(payload) {
   await writeFile(inPath, JSON.stringify(payload));
   try {
     try {
-      await execFileAsync('python3', ['make_pdf.py', inPath, outPath], { cwd: PDF_CWD, timeout: 120000 });
+      await execFileAsync(PYTHON_BIN, ['make_pdf.py', inPath, outPath], { cwd: PDF_CWD, timeout: 120000 });
     } catch (e) {
       const stderr = String((e && e.stderr) || '');
       if (e.code === 3 || stderr.includes('reportlab non installato')) {
@@ -825,7 +829,7 @@ export function createAppServer() { return createServer((req, res) => { if (req.
         const inPath = join(tmpdir(), `noesis-${stamp}.json`);
         const outPath = join(tmpdir(), `noesis-${stamp}.${fmt}`);
         return writeFile(inPath, JSON.stringify(model)).then(() =>
-          execFileAsync('python3', [script, inPath, outPath], { cwd: PDF_CWD, timeout: 180000 }).then(async () => {
+          execFileAsync(PYTHON_BIN, [script, inPath, outPath], { cwd: PDF_CWD, timeout: 180000 }).then(async () => {
             const buf = await readFile(outPath);
             unlink(inPath).catch(() => {});
             unlink(outPath).catch(() => {});

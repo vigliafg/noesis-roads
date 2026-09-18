@@ -36,6 +36,8 @@ import { validateModel } from '../core/modelSpec.mjs';
 import { assembleSectionPrompts, VERBOSITA, ISTRUZIONE } from '../core/prompts.mjs';
 
 const execFileAsync = promisify(execFile);
+// Binario Python: su Windows non esiste 'python3' (solo 'python'); override: PYTHON_BIN.
+const PYTHON_BIN = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
 const PORT = Number(process.env.NOESIS_CREATOR_PORT || process.env.ARTEST_CREATOR_PORT || 18100);
 const HOST = process.env.APP_HOST || '127.0.0.1';
 const PUBLIC_DIR = join(APP_ROOT, 'public');
@@ -1862,7 +1864,7 @@ async function renderAnnotated(artwork) {
   const outPath = join(UPLOAD_DIR, artwork.id + '.annotated.jpg');
   try {
     await writeFile(metaPath, JSON.stringify(details.map(d => ({ title: d.title, category: d.category, region: d.region }))));
-    const { stdout } = await execFileAsync('python3', ['annotate.py', sourcePath, metaPath, outPath], { cwd: APP_ROOT, timeout: 60000 });
+    const { stdout } = await execFileAsync(PYTHON_BIN, ['annotate.py', sourcePath, metaPath, outPath], { cwd: APP_ROOT, timeout: 60000 });
     const boxes = Number((stdout.match(/RIQUADRI_DISEGNATI\s+(\d+)/) || [])[1] || details.length);
     const captions = Number((stdout.match(/DIDASCALIE_DISEGNATE\s+(\d+)/) || [])[1] || details.length);
     return { data: await readFile(outPath), boxes, captions };
@@ -1894,7 +1896,7 @@ async function renderPdf(payload) {
   await writeFile(inPath, JSON.stringify(payload));
   try {
     try {
-      await execFileAsync('python3', ['make_pdf.py', inPath, outPath], { cwd: APP_ROOT, timeout: 120000 });
+      await execFileAsync(PYTHON_BIN, ['make_pdf.py', inPath, outPath], { cwd: APP_ROOT, timeout: 120000 });
     } catch (e) {
       const stderr = String((e && e.stderr) || '');
       if (e.code === 3 || stderr.includes('reportlab non installato')) {
@@ -1934,7 +1936,7 @@ async function renderOffice(script, model, ext) {
   await writeFile(inPath, JSON.stringify(model));
   try {
     try {
-      await execFileAsync('python3', [script, inPath, outPath], { cwd: APP_ROOT, timeout: 180000 });
+      await execFileAsync(PYTHON_BIN, [script, inPath, outPath], { cwd: APP_ROOT, timeout: 180000 });
     } catch (e) {
       const stderr = String((e && e.stderr) || '');
       if (/non installato/.test(stderr)) throw new Error(stderr.split('\n').filter(Boolean)[0]);
@@ -2137,7 +2139,7 @@ async function renderComposeThumb(comparison) {
   if (!pa || !pb) return null;
   const outPath = join(UPLOAD_DIR, comparison.id + '.thumb.jpg');
   try {
-    await execFileAsync('python3', ['compose_thumb.py', pa, pb, outPath], { cwd: APP_ROOT, timeout: 60000 });
+    await execFileAsync(PYTHON_BIN, ['compose_thumb.py', pa, pb, outPath], { cwd: APP_ROOT, timeout: 60000 });
     return { data: await readFile(outPath) };
   } finally {
     unlink(pa).catch(() => {});
