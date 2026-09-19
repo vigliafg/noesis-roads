@@ -25,12 +25,24 @@ import {
 } from './noesis-roads-creator/db.mjs';
 
 function loadLocalEnv() {
+  const fromFile = new Set();
   for (const filename of ['.env.local', '.env']) {
     try {
       const text = readFileSync(join(ROOT, filename), 'utf8');
       for (const line of text.split(/\r?\n/)) {
         const match = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
-        if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
+        if (!match) continue;
+        const value = match[2].replace(/^['"]|['"]$/g, '');
+        // La chiave si gestisce dal pannello Opzioni dell'hub (che scrive qui):
+        // il file prevale sull'ambiente, così una chiave salvata dall'utente non
+        // viene oscurata da una variabile di sistema preesistente; .env.local
+        // vince su .env. Per le altre variabili (porte, host, modelli...)
+        // l'ambiente continua a vincere.
+        if (match[1] === 'OPENROUTER_API_KEY') {
+          if (!fromFile.has(match[1])) { process.env[match[1]] = value; fromFile.add(match[1]); }
+        } else if (!process.env[match[1]]) {
+          process.env[match[1]] = value;
+        }
       }
     } catch {}
   }

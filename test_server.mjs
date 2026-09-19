@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile, fork } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, writeFile, copyFile, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildOverviewPrompt, buildSimilarPrompt, buildTextPrompt, callModel, callOpenRouter, callOpenRouterOverview, cleanModelJson, createAppServer, getOpenRouterApiKey, normalizeAnalysis, normalizeOverview, normalizeSimilar, resolveSimilarImage, VISION_MODEL, TEXT_MODEL } from './server.mjs';
@@ -645,7 +646,7 @@ test('creator PDF endpoints return application/pdf for the three card types', as
 // ---------------------------------------------------------------------------
 // Launcher: hub con due bottoni + supervisore + pannello Opzioni
 // ---------------------------------------------------------------------------
-import { createHubServer, validateConfig, effectiveConfig, DEFAULTS } from './launcher.mjs';
+import { createHubServer, validateConfig, effectiveConfig, loadLocalEnv, SYSTEM_KEY_AT_BOOT, DEFAULTS } from './launcher.mjs';
 
 test('launcher default ports avoid the crowded 80xx band', () => {
   assert.deepEqual([DEFAULTS.hubPort, DEFAULTS.viewerPort, DEFAULTS.creatorPort], [18080, 18000, 18100]);
@@ -748,4 +749,40 @@ test('launcher config roundtrips on an isolated env file without leaking the key
     if (previous === undefined) delete process.env.NOESIS_HUB_ENV_FILE; else process.env.NOESIS_HUB_ENV_FILE = previous;
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('loadLocalEnv: la chiave in .env.local prevale sulla variabile di sistema, le altre no', () => {
+  // Regressione: una chiave salvata dal pannello Opzioni dell'hub veniva
+  // oscurata al riavvio da una OPENROUTER_API_KEY preesistente nell'ambiente
+  // di sistema. La chiave scritta nel file deve vincere; le altre variabili
+  // (porte, host, modelli...) restano controllate dall'ambiente.
+  const dir = mkdtempSync(join(tmpdir(), 'noesis-env-prio-'));
+  try {
+    writeFileSync(join(dir, '.env.local'), [
+      'OPENROUTER_API_KEY=chiave-del-file',
+      'OPENROUTER_VISION_MODEL=modello-del-file',
+      'APP_PORT=19999'
+    ].join('\n'));
+    const env = { OPENROUTER_API_KEY: 'chiave-di-sistema', OPENROUTER_VISION_MODEL: 'modello-di-sistema', APP_PORT: '18888' };
+    loadLocalEnv(dir, env);
+    assert.equal(env.OPENROUTER_API_KEY, 'chiave-del-file'); // il file vince
+    assert.equal(env.OPENROUTER_VISION_MODEL, 'modello-di-sistema'); // l'ambiente vince
+    assert.equal(env.APP_PORT, '18888');
+    // Primo avvio senza nulla nell'ambiente: il file popola tutto.
+    const env2 = {};
+    loadLocalEnv(dir, env2);
+    assert.equal(env2.OPENROUTER_API_KEY, 'chiave-del-file');
+    assert.equal(env2.OPENROUTER_VISION_MODEL, 'modello-del-file');
+    assert.equal(env2.APP_PORT, '19999');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('effectiveConfig espone systemKeyPresent senza mai esporre la chiave', () => {
+  const cfg = effectiveConfig({ OPENROUTER_API_KEY: 'segreto-da-non-echeggiare' });
+  assert.equal(cfg.apiKeyConfigured, true);
+  assert.equal(cfg.systemKeyPresent, typeof SYSTEM_KEY_AT_BOOT === 'boolean');
+  assert.ok(!JSON.stringify(cfg).includes('segreto-da-non-echeggiare'));
+  assert.equal(effectiveConfig({}).systemKeyPresent, SYSTEM_KEY_AT_BOOT);
 });

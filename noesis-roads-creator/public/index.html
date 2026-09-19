@@ -2722,9 +2722,25 @@ function refreshList() {
 /* ================= boot ================= */
 bindGlobal();
 api('/api/status').then(function (s) {
-  if (!s.configured) toast('Chiave OpenRouter non configurata: le generazioni non funzioneranno');
+  if (!s.configured) showKeyBanner();
 });
 refreshList();
+
+/* Banner persistente «chiave mancante»: resta in cima alla home finché la
+   chiave non viene configurata, con scorciatoia al pannello Opzioni dell'hub. */
+function showKeyBanner() {
+  var existing = document.getElementById('keyBanner');
+  if (existing) return;
+  var hub = (window.CREATOR_DATA && window.CREATOR_DATA.hubUrl) || ('http://' + (location.hostname || '127.0.0.1') + ':18080/');
+  var el = document.createElement('div');
+  el.id = 'keyBanner';
+  el.className = 'banner';
+  el.innerHTML = '<span style="font-size:16px;line-height:1.2">🔑</span><span><strong>Chiave OpenRouter non configurata:</strong> le generazioni AI non funzioneranno. ' +
+    'Aprila una volta sola dal pannello Opzioni dell\u2019hub. <button class="btn small primary" data-open-hub="' + esc(hub) + '">⚙️ Configura nell\u2019hub →</button></span>';
+  el.querySelector('[data-open-hub]').onclick = function () { window.open(el.getAttribute('data-open-hub'), '_blank'); };
+  var anchor = document.getElementById('app');
+  anchor.parentNode.insertBefore(el, anchor);
+}
 </script>
 </body>
 </html>

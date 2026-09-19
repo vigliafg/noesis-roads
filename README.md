@@ -45,7 +45,7 @@ come renderer d'esempio. Modelli dichiarativi in `core/models.mjs` (arte:
 opera/soggetto/confronto; filosofia: autore-pensiero/tematica/
 confronto-filosofico).
 
-La chiave OpenRouter **non deve mai essere inserita in `index.html`, in `src/` o in un commit**. Copiare `.env.example` in `.env.local` e impostare `OPENROUTER_API_KEY`; il server carica il file automaticamente all’avvio. La chiave serve solo al flusso legacy di generazione live (analisi/overview/opere simili on-demand) e a noesis-roads-creator: il viewer delle schede pubblicate funziona anche senza.
+La chiave OpenRouter **non deve mai essere inserita in `index.html`, in `src/` o in un commit**. Copiare `.env.example` in `.env.local` e impostare `OPENROUTER_API_KEY`; il server carica il file automaticamente all’avvio e la chiave scritta nel file **prevale** su un’eventuale variabile di sistema (dettagli nella sezione *Configurazione della chiave API*). La chiave serve solo al flusso legacy di generazione live (analisi/overview/opere simili on-demand) e a noesis-roads-creator: il viewer delle schede pubblicate funziona anche senza.
 
 ## Installazione su un altro sistema
 
@@ -112,6 +112,10 @@ Su Windows PowerShell la chiave si passa come variabile d'ambiente:
 $env:OPENROUTER_API_KEY="incolla-la-tua-chiave-openrouter"
 node server.mjs
 ```
+
+Nota: se la chiave è stata salvata in `.env.local` (per esempio dal pannello ⚙️ Opzioni
+dell’hub), **quella del file vince** sulla variabile d’ambiente — vedi
+*Configurazione della chiave API*.
 
 ### Note
 
@@ -227,6 +231,18 @@ La chiave si configura in due modi, entrambi già documentati nella sezione
 Installazione: dal pannello **⚙️ Opzioni dell'hub** (`node launcher.mjs`, scrive
 `OPENROUTER_API_KEY` in `.env.local` e riavvia i due server) oppure modificando
 direttamente il file `.env.local` alla radice del repo.
+
+**Precedenza della chiave.** La chiave salvata in `.env.local`/`.env` **vince** sulla
+variabile d'ambiente `OPENROUTER_API_KEY` di sistema, all'avvio e a ogni riavvio dei
+server. In questo modo la chiave gestita dal pannello Opzioni resta quella effettiva
+anche su macchine dove una variabile di sistema è già impostata (per esempio con
+`$env:OPENROUTER_API_KEY` in PowerShell, o in un ambiente CI). Le altre variabili
+d'ambiente (porte, host, endpoint, modelli, RPM) mantengono il comportamento opposto:
+l'ambiente di sistema vince sul file, così chi lancia i processi le controlla dalla
+shell. Se una variabile di sistema è presente, il pannello Opzioni dell'hub lo segnala
+con un avviso. Rimuovendo la chiave dal pannello (campo vuoto) la riga viene tolta da
+`.env.local` e i server ripartono senza chiave: la variabile di sistema torna
+effettiva solo riavviando il launcher da shell.
 ## Test
 
 Eseguire i test Node integrati:

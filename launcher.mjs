@@ -33,22 +33,41 @@ export const CONFIG_FIELDS = Object.freeze({
 });
 
 export function loadLocalEnv(root = ROOT, env = process.env) {
+  const fromFile = new Set();
   for (const filename of ['.env.local', '.env']) {
     try {
       const text = readFileSync(join(root, filename), 'utf8');
       for (const line of text.split(/\r?\n/)) {
         const match = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
-        if (match && !env[match[1]]) env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
+        if (!match) continue;
+        const value = match[2].replace(/^['"]|['"]$/g, '');
+        // La chiave OpenRouter si gestisce SOLO dal pannello Opzioni dell'hub
+        // (che scrive qui): il file ha quindi la precedenza sull'ambiente, così
+        // una chiave salvata dall'utente non viene oscurata da una variabile di
+        // sistema preesistente. .env.local vince su .env. Le altre variabili
+        // (porte, host, modelli...) restano controllabili da chi lancia il
+        // processo: l'ambiente vince.
+        if (match[1] === 'OPENROUTER_API_KEY') {
+          if (!fromFile.has(match[1])) { env[match[1]] = value; fromFile.add(match[1]); }
+        } else if (!env[match[1]]) {
+          env[match[1]] = value;
+        }
       }
     } catch {}
   }
   return env;
 }
 
+// Catturata al caricamento del modulo, PRIMA di loadLocalEnv(): dice se
+// l'ambiente di sistema aveva già una OPENROUTER_API_KEY. Serve al pannello
+// Opzioni per spiegare che la chiave salvata in .env.local ha la precedenza.
+export const SYSTEM_KEY_AT_BOOT = Boolean((process.env.OPENROUTER_API_KEY || '').trim());
+
 // Config effettiva (mai valori segreti: solo flag apiKeyConfigured)
 export function effectiveConfig(env = process.env) {
   return {
     apiKeyConfigured: Boolean((env.OPENROUTER_API_KEY || '').trim()),
+    systemKeyPresent: SYSTEM_KEY_AT_BOOT,
     endpoint: env.OPENROUTER_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions',
     visionModel: env.OPENROUTER_VISION_MODEL || 'meta/muse-spark-1.3-contributor',
     textModel: env.OPENROUTER_TEXT_MODEL || 'meta/muse-spark-1.3-contributor',
@@ -214,6 +233,7 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
     <div class="eyebrow">Configurazione · .env.local</div>
     <h2>⚙️ Opzioni</h2>
     <p class="lead" id="keyState"></p>
+    <div class="banner" id="sysKeyNote" style="display:none">⚠️ Esiste anche una variabile di sistema OPENROUTER_API_KEY: la chiave salvata da questo pannello ha la precedenza e sarà quella usata al prossimo riavvio.</div>
     <div id="optMsg"></div>
     <div class="field"><label for="f_apiKey">Chiave API OpenRouter</label><input id="f_apiKey" type="password" autocomplete="off" placeholder="lascia vuoto per non cambiare"><small>Non viene mai mostrata: solo "configurata sì/no".</small></div>
     <div class="field"><label for="f_endpoint">Endpoint</label><input id="f_endpoint"></div>
@@ -274,6 +294,7 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
   function openModal() {
     fetch('/api/config').then(function (r) { return r.json(); }).then(function (c) {
       document.getElementById('keyState').textContent = 'Chiave API: ' + (c.apiKeyConfigured ? 'configurata ✓' : 'non configurata');
+      document.getElementById('sysKeyNote').style.display = c.systemKeyPresent ? 'block' : 'none';
       document.getElementById('f_apiKey').value = '';
       document.getElementById('f_endpoint').value = c.endpoint || '';
       document.getElementById('f_visionModel').value = c.visionModel || '';
