@@ -185,6 +185,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(-
 .statusline{font-size:11px;color:var(--muted);margin-top:14px}
 .banner{background:#fdf1e8;border:1px solid #f0d5c3;border-radius:12px;padding:14px 18px;color:#8a5a3a;font-size:12px;margin-bottom:22px}
 .banner.ok{background:#eef6f1;border-color:#cfe5da;color:#47715f}
+.modal .banner{margin:10px 0}.modal code{background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
 .modal-back{position:fixed;inset:0;background:rgba(23,52,74,.45);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:10}
 .modal-back.open{display:flex}
 .modal{background:var(--white);border-radius:14px;max-width:560px;width:100%;padding:26px;box-shadow:0 22px 55px rgba(33,51,57,.25);max-height:88vh;overflow:auto}
@@ -210,6 +211,7 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
   <h1>Scegli da dove cominciare</h1>
   <p class="lead">Due programmi indipendenti: <b>Vedi</b> mostra le schede didattiche già pronte, <b>Crea</b> le genera con l'aiuto dell'AI. L'hub li tiene accesi entrambi.</p>
   <div id="lanBanner"></div>
+  <div class="banner" id="keyBar" style="display:none"><span style="flex:1">⚠️ Chiave OpenRouter non configurata: le generazioni AI non funzionano.</span><button class="btn small primary" id="keyBarBtn">⚙️ Configura ora</button></div>
   <div class="cards">
     <div class="bigcard viewer">
       <span class="eyebrow">Lettura · porta ${esc(cfg.viewerPort)}</span>
@@ -252,8 +254,19 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
   </div>
 </div>
 <div id="toast"></div>
+<div class="modal-back" id="wizBack">
+  <div class="modal" role="dialog" aria-label="Primo avvio">
+    <div class="eyebrow">Primo avvio · 1 di 2</div>
+    <h2>Benvenuto in Noesis Roads</h2>
+    <p class="lead">Per <b>creare</b> le schede con l'AI serve una chiave OpenRouter (si ottiene su <b>openrouter.ai/keys</b>). <b>Vedere</b> le schede pubblicate funziona anche senza.</p>
+    <div id="wizMsg"></div>
+    <div class="field"><label for="wiz_key">Chiave API OpenRouter</label><input id="wiz_key" type="password" autocomplete="off" placeholder="sk-or-v1-…"><small>Viene salvata in .env.local e non viene mai mostrata.</small></div>
+    <div class="row"><button class="btn ghost" id="wizSkip">Salta, guarda solo le schede</button><button class="btn primary" id="wizSave">Salva e verifica</button></div>
+  </div>
+</div>
 <script>
 (function () {
+  var __CFG__ = ${JSON.stringify({ apiKeyConfigured: cfg.apiKeyConfigured })};
   var viewerPort = ${JSON.stringify(cfg.viewerPort)}, creatorPort = ${JSON.stringify(cfg.creatorPort)};
   function host() { return location.hostname || '127.0.0.1'; }
   var viewerUrl = 'http://' + host() + ':' + viewerPort + '/';
@@ -286,6 +299,50 @@ details.adv summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mu
     }).catch(function () {});
   }
   refresh(); setInterval(refresh, 5000);
+  // Banner chiave: visibile finché la chiave non è configurata (lato server).
+  var keyBar = document.getElementById('keyBar');
+  keyBar.style.display = 'none';
+  if (!__CFG__.apiKeyConfigured) {
+    keyBar.style.display = 'flex';
+    document.getElementById('keyBarBtn').onclick = function () { openModal(); };
+  }
+  // Wizard di primo avvio: si apre solo alla PRIMA visita quando manca la chiave
+  // (flag lato client in localStorage, così «salta» non riappare a ogni ricarica).
+  try { if (!__CFG__.apiKeyConfigured && !localStorage.getItem('noesisHubOnboarded')) openWizard(); } catch (e) {}
+  function openWizard() {
+    document.getElementById('wizMsg').innerHTML = '';
+    document.getElementById('wiz_key').value = '';
+    document.getElementById('wizBack').classList.add('open');
+    setTimeout(function () { document.getElementById('wiz_key').focus(); }, 50);
+  }
+  function closeWizard() {
+    try { localStorage.setItem('noesisHubOnboarded', '1'); } catch (e) {}
+    document.getElementById('wizBack').classList.remove('open');
+  }
+  document.getElementById('wizSkip').onclick = closeWizard;
+  document.getElementById('wizSave').onclick = function () {
+    var key = document.getElementById('wiz_key').value.trim();
+    var msg = document.getElementById('wizMsg');
+    if (!key) { msg.innerHTML = '<div class="banner">Inserisci una chiave (o premi «Salta»).</div>'; return; }
+    msg.innerHTML = '<div class="banner ok">Verifica della chiave in corso…</div>';
+    fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key }) })
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+      .then(function (r) {
+        if (!r.ok) { msg.innerHTML = '<div class="banner">Errore nel salvataggio: ' + (r.body.error || '?') + '</div>'; return; }
+        msg.innerHTML = '<div class="banner ok">Salvata. Controllo presso OpenRouter…</div>';
+        fetch('/api/key-check').then(function (res) { return res.json(); }).then(function (kc) {
+          closeWizard();
+          var ok = kc.valid === true;
+          var bar = document.getElementById('keyBar');
+          bar.style.display = ok ? 'none' : 'flex';
+          bar.querySelector('span').textContent = ok ? '✓ Chiave OpenRouter configurata e verificata.' : '⚠️ La chiave salvata NON è risultata valida presso OpenRouter: le generazioni falliranno. Ricontrollala.';
+          if (ok) { bar.classList.add('ok'); setTimeout(function () { bar.style.display = 'none'; }, 4000); }
+          toast(ok ? 'Chiave verificata: tutto pronto!' : 'Chiave salvata ma non valida: verifica su openrouter.ai/keys');
+          setTimeout(refresh, 2500);
+        }).catch(function () { closeWizard(); toast('Chiave salvata (verifica presso OpenRouter non riuscita)'); setTimeout(refresh, 2500); });
+      })
+      .catch(function (e) { msg.innerHTML = '<div class="banner">Errore: ' + e.message + '</div>'; });
+  };
   var back = document.getElementById('modalBack');
   document.getElementById('gearBtn').onclick = function () { openModal(); };
   document.getElementById('cancelBtn').onclick = function () { back.classList.remove('open'); };
@@ -427,8 +484,21 @@ export function createHubServer(opts = {}) {
           hub: { port: hubPort },
           viewer: { port: cfg.viewerPort, up: viewerUp },
           creator: { port: cfg.creatorPort, up: creatorUp },
-          config: { lanExposed: cfg.lanExposed }
+          config: { lanExposed: cfg.lanExposed, apiKeyConfigured: cfg.apiKeyConfigured }
         });
+      }
+      // Verifica REALE della chiave presso OpenRouter (mai il valore: solo valid):
+      // valid null se la rete non risponde, così il wizard degrada senza bloccare.
+      if (req.method === 'GET' && url.pathname === '/api/key-check') {
+        const apiKey = (env.OPENROUTER_API_KEY || '').trim();
+        if (!apiKey) return sendJson(res, 200, { valid: false, reason: 'not-configured' });
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 8000);
+          const r = await fetch('https://openrouter.ai/api/v1/key', { headers: { Authorization: `Bearer ${apiKey}` }, signal: ctrl.signal });
+          clearTimeout(timer);
+          return sendJson(res, 200, { valid: r.ok });
+        } catch { return sendJson(res, 200, { valid: null }); }
       }
       if (req.method === 'GET' && url.pathname === '/api/config') {
         return sendJson(res, 200, effectiveConfig(env));

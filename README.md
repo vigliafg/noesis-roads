@@ -83,6 +83,12 @@ node launcher.mjs                # hub → http://127.0.0.1:18080
 Dall'hub: **"Vedi le schede"** → viewer su :18000,
 **"Crea le schede"** → authoring su :18100. `Ctrl+C` spegne tutto.
 
+**Primo avvio senza chiave:** l'hub mostra un banner e una finestra di benvenuto che
+chiede la chiave OpenRouter (salvataggio immediato in `.env.local`, riavvio dei server
+e verifica reale della chiave presso OpenRouter — mai mostrata né restituita).
+«Salta, guarda solo le schede» chiude la finestra per sempre (anche senza chiave):
+per configurarla dopo, ⚙️ Opzioni.
+
 I due programmi vivono in maniera **indipendente**: noesis-roads-creator **crea** le
 schede (authoring + pipeline AI), noesis-roads le **visualizza** (viewer di lettura).
 Avvio manuale senza launcher (un terminale per server):

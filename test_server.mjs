@@ -786,3 +786,28 @@ test('effectiveConfig espone systemKeyPresent senza mai esporre la chiave', () =
   assert.ok(!JSON.stringify(cfg).includes('segreto-da-non-echeggiare'));
   assert.equal(effectiveConfig({}).systemKeyPresent, SYSTEM_KEY_AT_BOOT);
 });
+
+test('hub: banner chiave, wizard, key-check e health senza chiave configurata', async () => {
+  // Primo avvio tipico: nessuna chiave (né ambiente né .env.local). L'hub deve
+  // mostrare banner + wizard e offrire /api/key-check, senza mai echeggiare valori.
+  const env = { ...process.env };
+  delete env.OPENROUTER_API_KEY;
+  const hub = createHubServer({ hubPort: 0, spawn: false, env });
+  await new Promise(resolve => hub.server.listen(0, '127.0.0.1', resolve));
+  const port = hub.server.address().port;
+  try {
+    const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    assert.ok(html.includes('id="keyBar"')); // banner chiave persistente
+    assert.ok(html.includes('id="wizBack"')); // wizard primo avvio
+    assert.ok(html.includes('"apiKeyConfigured":false'));
+    assert.ok(!html.includes('Bearer ')); // nessun materiale di autenticazione in pagina
+    assert.ok(!html.includes('OPENROUTER_API_KEY=')); // mai un valore di chiave
+    const kc = await (await fetch(`http://127.0.0.1:${port}/api/key-check`)).json();
+    assert.deepEqual(kc, { valid: false, reason: 'not-configured' });
+    const health = await (await fetch(`http://127.0.0.1:${port}/api/health`)).json();
+    assert.equal(health.config.apiKeyConfigured, false);
+    assert.equal(health.config.lanExposed, false);
+  } finally {
+    await hub.stop();
+  }
+});
