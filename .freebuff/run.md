@@ -4,7 +4,8 @@
 
 - No environment files or package dependencies are required.
 - Ensure Node.js 22.5+ is available (`node:sqlite`).
-- For AI generation, copy `.env.example` to `.env.local` and fill in `OPENROUTER_API_KEY`. The servers load `.env.local` / `.env` automatically. Never commit the key.
+- Optional automated setup (checks Node, configures Python export modules, creates `.env.local`, starts the launcher): `node install.mjs` (flags: `--skip-python`, `--skip-launch`).
+- For AI generation, copy `.env.example` to `.env.local` and fill in `OPENROUTER_API_KEY`. The servers load `.env.local` / `.env` automatically (file wins over the system env for the key; an EMPTY key line in the file never erases the system key). Never commit the key.
 
 ## Run the servers
 

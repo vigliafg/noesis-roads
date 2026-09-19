@@ -48,7 +48,9 @@ export function loadLocalEnv(root = ROOT, env = process.env) {
         // (porte, host, modelli...) restano controllabili da chi lancia il
         // processo: l'ambiente vince.
         if (match[1] === 'OPENROUTER_API_KEY') {
-          if (!fromFile.has(match[1])) { env[match[1]] = value; fromFile.add(match[1]); }
+          // Guardia: un segreto lasciato VUOTO nel file (template .env.example)
+          // non deve cancellare la chiave di sistema esistente.
+          if (!fromFile.has(match[1]) && value) { env[match[1]] = value; fromFile.add(match[1]); }
         } else if (!env[match[1]]) {
           env[match[1]] = value;
         }
@@ -548,6 +550,14 @@ async function main() {
   loadLocalEnv();
   const hub = createHubServer();
   const host = process.env.APP_HOST || '127.0.0.1';
+  // Porta hub occupata (di solito: un altro launcher già attivo): messaggio
+  // chiaro e uscita pulita invece dello stack trace EADDRINUSE.
+  hub.server.on('error', (e) => {
+    console.error(`[launcher] impossibile aprire la porta hub ${hub.ports.hub} (${e.code || e.message}).`);
+    console.error('[launcher] Probabile istanza già attiva: apri http://127.0.0.1:' + hub.ports.hub + '/ oppure ferma quell\u2019istanza (o cambia NOESIS_HUB_PORT).');
+    hub.stop().catch(() => {});
+    process.exit(1);
+  });
   hub.server.listen(hub.ports.hub, host, () => {
     console.log(`Noesis Roads hub: http://${host}:${hub.ports.hub}`);
     console.log(`  viewer  (Vedi le schede): http://${host}:${hub.ports.viewer}`);

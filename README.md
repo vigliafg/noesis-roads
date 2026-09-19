@@ -61,6 +61,21 @@ Nessun `npm install`: zero dipendenze, niente `package.json`, niente build.
 
 ### Procedura
 
+**Installer automatico (consigliato, multipiattaforma):**
+
+```bash
+git clone https://github.com/vigliafg/noesis-roads.git && cd noesis-roads
+node install.mjs          # opzioni: --skip-python · --skip-launch
+```
+
+Verifica Node ≥ 22.5 (con `node:sqlite`), rileva Python 3 e installa i moduli
+per gli export gestendo i casi tipici (PEP 668 su Linux/Homebrew, launcher `py`
+su Windows, `python3` stub dello Store), crea `.env.local` da `.env.example`
+(senza campi segreto vuoti, per non oscurare l'ambiente) e avvia il launcher.
+Python e i moduli di export sono **opzionali**: se mancano, il resto funziona.
+
+**Manuale:**
+
 ```bash
 git clone https://github.com/vigliafg/noesis-roads.git && cd noesis-roads
 pip install pillow reportlab

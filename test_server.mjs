@@ -787,6 +787,41 @@ test('effectiveConfig espone systemKeyPresent senza mai esporre la chiave', () =
   assert.equal(effectiveConfig({}).systemKeyPresent, SYSTEM_KEY_AT_BOOT);
 });
 
+test('loadLocalEnv: un segreto VUOTO nel file non cancella la chiave di sistema', () => {
+  // Scenario: .env.example copiato in .env.local con "OPENROUTER_API_KEY=" vuoto
+  // (ad esempio dall'installer). Il template non deve oscurare l'ambiente.
+  const dir = mkdtempSync(join(tmpdir(), 'noesis-env-empty-'));
+  try {
+    writeFileSync(join(dir, '.env.local'), 'OPENROUTER_API_KEY=\nAPP_PORT=19999\n');
+    const env = { OPENROUTER_API_KEY: 'chiave-di-sistema' };
+    loadLocalEnv(dir, env);
+    assert.equal(env.OPENROUTER_API_KEY, 'chiave-di-sistema'); // non cancellata
+    assert.equal(env.APP_PORT, '19999'); // le altre impostazioni del file valgono
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('install.mjs: envLocalContentFromExample prepara .env.local senza campi segreto vuoti', async () => {
+  const { envLocalContentFromExample } = await import('./install.mjs');
+  const out = envLocalContentFromExample([
+    '[TEMPLATE]',
+    'OPENROUTER_API_KEY=',
+    'OPENROUTER_ENDPOINT=https://openrouter.ai/api/v1/chat/completions',
+    '# pip install pillow reportlab',
+    'pillow reportlab',
+    'APP_PORT=18000'
+  ].join('\n'));
+  assert.ok(!out.includes('OPENROUTER_API_KEY=')); // segreto vuoto rimosso
+  assert.ok(out.includes('OPENROUTER_ENDPOINT=')); // le altre righe restano
+  assert.ok(out.includes('APP_PORT=18000'));
+  assert.ok(!out.includes('pillow reportlab')); // riga pip spezzata riunita
+  assert.ok(!out.includes('# pip install'));
+  // Template già pulito: nessuna modifica indesiderata.
+  const plain = 'A=1\nB=2\n';
+  assert.equal(envLocalContentFromExample(plain), plain);
+});
+
 test('hub: banner chiave, wizard, key-check e health senza chiave configurata', async () => {
   // Primo avvio tipico: nessuna chiave (né ambiente né .env.local). L'hub deve
   // mostrare banner + wizard e offrire /api/key-check, senza mai echeggiare valori.

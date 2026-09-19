@@ -39,7 +39,9 @@ function loadLocalEnv() {
         // vince su .env. Per le altre variabili (porte, host, modelli...)
         // l'ambiente continua a vincere.
         if (match[1] === 'OPENROUTER_API_KEY') {
-          if (!fromFile.has(match[1])) { process.env[match[1]] = value; fromFile.add(match[1]); }
+          // Guardia: un segreto lasciato VUOTO nel file (template .env.example)
+          // non deve cancellare la chiave di sistema esistente.
+          if (!fromFile.has(match[1]) && value) { process.env[match[1]] = value; fromFile.add(match[1]); }
         } else if (!process.env[match[1]]) {
           process.env[match[1]] = value;
         }
